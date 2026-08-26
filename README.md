@@ -26,5 +26,6 @@ uvicorn app.main:app --reload
 
 ## 后续飞书对接
 
-飞书 SDK、通讯录、多维表格、机器人消息和事件回调会放在 `app/integrations/feishu/`，不进入当前流程核心。等企业自建应用版本发布并获得实际权限后，再实现 Feishu Repository 和消息适配器。
+飞书 SDK、通讯录、多维表格、机器人消息和事件回调放在 `app/integrations/feishu/`，不进入当前流程核心。
 
+本地接入需要在运行环境设置 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`。不要把 App Secret 提交到 Git。回调地址为 `/api/feishu/events` 和 `/api/feishu/card-actions`；正式接入前还需要补齐事件验签/加解密、幂等处理和 Feishu Repository。
