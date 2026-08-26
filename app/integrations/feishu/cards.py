@@ -10,7 +10,7 @@ def task_assignment_card(
             {"tag": "action", "actions": [
                 {"tag": "button", "text": {"tag": "plain_text", "content": "接受任务"}, "type": "primary", "value": {"action": "claim", "project_id": project_id, "node_instance_id": node_instance_id}},
                 {"tag": "button", "text": {"tag": "plain_text", "content": "查看项目"}, "type": "default", "value": {"action": "view_project", "project_id": project_id, "node_instance_id": node_instance_id}},
+                {"tag": "button", "text": {"tag": "plain_text", "content": "模拟完成当前节点"}, "type": "default", "value": {"action": "simulate_complete", "project_id": project_id, "node_instance_id": node_instance_id}},
             ]},
         ],
     }
-

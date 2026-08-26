@@ -21,6 +21,7 @@ class WorkflowRuntime:
         if os.getenv("FEISHU_RECEIVE_ID_TYPE", "open_id") == "open_id" and configured_user:
             self.assignments["product_manager"] = configured_user
         self.service = WorkflowService(self.repository, self.definitions, self.assignments)
+        self.simulation_mode = os.getenv("WORKFLOW_SIMULATION_MODE", "true").lower() in {"1", "true", "yes", "on"}
         self._ensure_mock_project()
 
     def _ensure_mock_project(self) -> None:
@@ -62,6 +63,40 @@ class WorkflowRuntime:
             f"进度：{completed}/{len(self.definitions)}\n"
             f"{current_text}\n{owner_text}"
         )
+
+    def claim_node(self, node_id: str, operator_user_id: str):
+        node = self.repository.get_node(node_id)
+        if self.simulation_mode and node.owner_user_id != operator_user_id:
+            # In the MVP one real Feishu user can impersonate the configured
+            # department role so the complete serial chain can be demonstrated.
+            return self.service.claim(node_id, node.owner_user_id)
+        return self.service.claim(node_id, operator_user_id)
+
+    def simulate_complete(self, node_id: str, operator_user_id: str):
+        node = self.repository.get_node(node_id)
+        if node.status.value == "ready":
+            node = self.claim_node(node_id, operator_user_id)
+        if node.status.value == "in_progress":
+            definition = self.definitions[node.definition_id]
+            node = self.service.submit(node.id, node.owner_user_id, definition.required_outputs)
+        if node.status.value == "reviewing":
+            node = self.service.accept(node.id, node.reviewer_user_id)
+        project = self.repository.get_project(node.project_id)
+        return node, project
+
+    def current_card_data(self, project_id: str) -> dict[str, str] | None:
+        project = self.repository.get_project(project_id)
+        if not project.current_node_id:
+            return None
+        node = self.repository.get_node(project.current_node_id)
+        definition = self.definitions[node.definition_id]
+        return {
+            "project_id": project.id,
+            "node_instance_id": node.id,
+            "product_name": project.product_name,
+            "node_name": f"{node.definition_id} {definition.name}",
+            "owner_name": f"模拟角色：{definition.owner_role}",
+        }
 
 
 runtime = WorkflowRuntime()
