@@ -33,5 +33,5 @@ async def feishu_card_actions(request: Request) -> dict[str, Any]:
     action = extract_card_action(payload)
     # Card callbacks need a Feishu-supported response body to show feedback in
     # the client. Business state mutation will be wired to WorkflowService next.
-    content = "任务已接收" if action.get("action") == "accept_task" else "操作已收到"
-    return {"toast": {"type": "success", "content": content}}
+    content = "任务已接收" if action.get("action") == "claim" else "操作已收到"
+    return {"toast": {"type": "success", "content": content}, "action": action}
