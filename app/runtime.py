@@ -25,25 +25,60 @@ class WorkflowRuntime:
         self._ensure_mock_project()
 
     def _ensure_mock_project(self) -> None:
-        project_id = "PRJ-MOCK-001"
+        self._seed_demo_project(
+            project_id="PRJ-MOCK-001",
+            product_code="MOCK-2026-001",
+            product_name="ERGOLIFE 人体工学办公椅 X1",
+            completed_nodes=0,
+            initial_node_id="NODE-P01-MOCK",
+        )
+        self._seed_demo_project(
+            project_id="PRJ-MOCK-002",
+            product_code="MOCK-2026-002",
+            product_name="ERGOLIFE 智能升降桌 E2",
+            completed_nodes=4,
+        )
+        self._seed_demo_project(
+            project_id="PRJ-MOCK-003",
+            product_code="MOCK-2026-003",
+            product_name="ERGOLIFE 运动护腰 Pro",
+            completed_nodes=11,
+        )
+
+    def _seed_demo_project(
+        self,
+        *,
+        project_id: str,
+        product_code: str,
+        product_name: str,
+        completed_nodes: int,
+        initial_node_id: str | None = None,
+    ) -> None:
         if project_id in self.repository.projects:
             return
         owner = self.assignments["product_manager"]
         project = ProductProject(
             id=project_id,
-            product_code="MOCK-2026-001",
-            product_name="ERGOLIFE 人体工学办公椅 X1",
+            product_code=product_code,
+            product_name=product_name,
             target_market="美国",
             sales_channel="Amazon US",
             owner_user_id=owner,
         )
         self.service.create_project(project, owner)
-        node = self.repository.get_node(project.current_node_id)
-        del self.repository.nodes[node.id]
-        node.id = "NODE-P01-MOCK"
-        self.repository.save_node(node)
-        project.current_node_id = node.id
-        self.repository.save_project(project)
+        if initial_node_id:
+            node = self.repository.get_node(project.current_node_id)
+            del self.repository.nodes[node.id]
+            node.id = initial_node_id
+            self.repository.save_node(node)
+            project.current_node_id = node.id
+            self.repository.save_project(project)
+        for _ in range(completed_nodes):
+            node = self.repository.get_node(project.current_node_id)
+            self.service.claim(node.id, node.owner_user_id)
+            definition = self.definitions[node.definition_id]
+            self.service.submit(node.id, node.owner_user_id, definition.required_outputs)
+            self.service.accept(node.id, node.reviewer_user_id)
 
     def project_summary(self, project_id: str) -> str:
         project = self.repository.get_project(project_id)
@@ -108,6 +143,37 @@ class WorkflowRuntime:
             icon = {"completed": "✅", "in_progress": "🔵", "ready": "🟡", "reviewing": "🟣", "rejected": "🔴"}.get(status, "⚪")
             lines.append(f"{icon} {definition_id} {definition.name}｜{status}")
         return lines
+
+    def dashboard_data(self) -> list[dict]:
+        result = []
+        for project in self.repository.projects.values():
+            nodes = {node.definition_id: node for node in self.repository.list_project_nodes(project.id)}
+            current = self.repository.get_node(project.current_node_id) if project.current_node_id else None
+            result.append(
+                {
+                    "id": project.id,
+                    "product_code": project.product_code,
+                    "product_name": project.product_name,
+                    "target_market": project.target_market,
+                    "sales_channel": project.sales_channel,
+                    "status": project.status.value,
+                    "current_node_id": current.definition_id if current else None,
+                    "current_node_name": self.definitions[current.definition_id].name if current else "已完成",
+                    "completed": sum(node.status.value == "completed" for node in nodes.values()),
+                    "total": len(self.definitions),
+                    "nodes": [
+                        {
+                            "id": definition_id,
+                            "name": definition.name,
+                            "stage": definition.stage,
+                            "status": nodes[definition_id].status.value if definition_id in nodes else "pending",
+                            "owner_role": definition.owner_role,
+                        }
+                        for definition_id, definition in self.definitions.items()
+                    ],
+                }
+            )
+        return result
 
 
 runtime = WorkflowRuntime()

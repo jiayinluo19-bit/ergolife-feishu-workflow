@@ -1,6 +1,12 @@
+import os
+from urllib.parse import quote
+
+
 def task_assignment_card(
     *, project_id: str, node_instance_id: str, product_name: str, node_name: str, owner_name: str
 ) -> dict:
+    dashboard_url = os.getenv("PUBLIC_BASE_URL", "https://ergolife-feishu-workflow-production.up.railway.app")
+    dashboard_url = f"{dashboard_url.rstrip('/')}/dashboard?project_id={quote(project_id)}"
     return {
         "config": {"wide_screen_mode": True, "enable_forward": True},
         "header": {"template": "blue", "title": {"tag": "plain_text", "content": "ERGOLIFE 新任务"}},
@@ -9,7 +15,7 @@ def task_assignment_card(
             {"tag": "hr"},
             {"tag": "action", "actions": [
                 {"tag": "button", "text": {"tag": "plain_text", "content": "接受任务"}, "type": "primary", "value": {"action": "claim", "project_id": project_id, "node_instance_id": node_instance_id}},
-                {"tag": "button", "text": {"tag": "plain_text", "content": "查看项目"}, "type": "default", "value": {"action": "view_project", "project_id": project_id, "node_instance_id": node_instance_id}},
+                {"tag": "button", "text": {"tag": "plain_text", "content": "打开生命周期看板"}, "type": "default", "url": dashboard_url},
                 {"tag": "button", "text": {"tag": "plain_text", "content": "模拟完成当前节点"}, "type": "default", "value": {"action": "simulate_complete", "project_id": project_id, "node_instance_id": node_instance_id}},
             ]},
         ],
