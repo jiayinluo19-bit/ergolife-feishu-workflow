@@ -34,9 +34,29 @@ def test_card_action_endpoint_extracts_business_identity():
     }
 
 
+def test_mock_card_actions_update_and_report_workflow_state():
+    client = TestClient(app)
+    claim = client.post(
+        "/api/feishu/card-actions",
+        json={
+            "event": {
+                "operator": {"open_id": "mock_product_manager"},
+                "action": {"value": {"action": "claim", "project_id": "PRJ-MOCK-001", "node_instance_id": "NODE-P01-MOCK"}},
+            }
+        },
+    )
+    assert claim.json()["toast"]["type"] == "success"
+    assert "进行中" in claim.json()["toast"]["content"]
+
+    view = client.post(
+        "/api/feishu/card-actions",
+        json={"event": {"action": {"value": {"action": "view_project", "project_id": "PRJ-MOCK-001"}}}},
+    )
+    assert "P01" in view.json()["toast"]["content"]
+
+
 def test_feishu_settings_require_secret():
     try:
         FeishuSettings.from_env()
     except FeishuNotConfiguredError:
         pass
-
