@@ -24,6 +24,16 @@ uvicorn app.main:app --reload
 
 健康检查：`http://127.0.0.1:8000/health`
 
+## 发送第一条真实飞书卡片
+
+将 `.env.example` 复制为 `.env`，填写 App Secret 和你自己的测试接收人。接收人可以使用 `open_id`，也可以将 `FEISHU_RECEIVE_ID_TYPE` 改为飞书 API 支持的接收人类型。
+
+```powershell
+python scripts/send_test_card.py
+```
+
+不要把 `.env` 提交到 Git 或发送到聊天中。
+
 ## 后续飞书对接
 
 飞书 SDK、通讯录、多维表格、机器人消息和事件回调放在 `app/integrations/feishu/`，不进入当前流程核心。
