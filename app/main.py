@@ -3,7 +3,7 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, Request
 
 from .integrations.feishu.events import extract_card_action, is_url_verification, url_verification_response
-from .integrations.feishu.cards import task_assignment_card
+from .integrations.feishu.cards import project_lifecycle_card, task_assignment_card
 from .integrations.feishu.client import FeishuNotConfiguredError, FeishuOpenAPI
 from .runtime import runtime
 from .services.workflow_service import WorkflowError
@@ -13,6 +13,25 @@ app = FastAPI(title="ERGOLIFE 商品全生命周期协同 MVP", version="0.1.0")
 
 def _send_next_card(project_id: str, receive_id: str) -> None:
     if not receive_id:
+        return
+
+
+def _send_lifecycle_card(project_id: str, receive_id: str) -> None:
+    if not receive_id:
+        return
+    try:
+        project = runtime.repository.get_project(project_id)
+        lines = runtime.lifecycle_lines(project_id)
+        FeishuOpenAPI().send_interactive_card(
+            receive_id,
+            project_lifecycle_card(
+                product_name=project.product_name,
+                project_status=project.status.value,
+                progress=f"{sum(line.startswith('✅') for line in lines)}/22",
+                lines=lines,
+            ),
+        )
+    except (FeishuNotConfiguredError, KeyError, RuntimeError):
         return
     data = runtime.current_card_data(project_id)
     if not data:
@@ -55,6 +74,7 @@ async def feishu_card_actions(request: Request, background_tasks: BackgroundTask
             content = f"任务已接收：{node.definition_id}，状态已变更为进行中"
         elif action.get("action") == "view_project":
             content = runtime.project_summary(action["project_id"])
+            background_tasks.add_task(_send_lifecycle_card, action["project_id"], action["operator_open_id"])
         elif action.get("action") == "simulate_complete":
             node, project = runtime.simulate_complete(action["node_instance_id"], action["operator_open_id"])
             if project.current_node_id:

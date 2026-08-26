@@ -98,5 +98,16 @@ class WorkflowRuntime:
             "owner_name": f"模拟角色：{definition.owner_role}",
         }
 
+    def lifecycle_lines(self, project_id: str) -> list[str]:
+        project = self.repository.get_project(project_id)
+        nodes = {node.definition_id: node for node in self.repository.list_project_nodes(project_id)}
+        lines = []
+        for definition_id, definition in self.definitions.items():
+            node = nodes.get(definition_id)
+            status = node.status.value if node else "pending"
+            icon = {"completed": "✅", "in_progress": "🔵", "ready": "🟡", "reviewing": "🟣", "rejected": "🔴"}.get(status, "⚪")
+            lines.append(f"{icon} {definition_id} {definition.name}｜{status}")
+        return lines
+
 
 runtime = WorkflowRuntime()

@@ -14,3 +14,15 @@ def task_assignment_card(
             ]},
         ],
     }
+
+
+def project_lifecycle_card(*, product_name: str, project_status: str, progress: str, lines: list[str]) -> dict:
+    return {
+        "config": {"wide_screen_mode": True, "enable_forward": True},
+        "header": {"template": "turquoise", "title": {"tag": "plain_text", "content": "ERGOLIFE 商品全链路"}},
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": f"**商品：**{product_name}\n**项目状态：**{project_status}\n**进度：**{progress}"}},
+            {"tag": "hr"},
+            {"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}},
+        ],
+    }
