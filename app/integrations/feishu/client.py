@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+from lark_oapi.api.contact.v3 import BatchGetIdUserRequest, BatchGetIdUserRequestBody
 
 
 class FeishuNotConfiguredError(RuntimeError):
@@ -42,6 +43,23 @@ class FeishuOpenAPI:
             .app_secret(self.settings.app_secret)
             .build()
         )
+
+    def resolve_user_open_id_by_email(self, email: str) -> str:
+        request = (
+            BatchGetIdUserRequest.builder()
+            .user_id_type("open_id")
+            .request_body(BatchGetIdUserRequestBody.builder().emails([email]).build())
+            .build()
+        )
+        response = self.client.contact.v3.user.batch_get_id(request)
+        if not response.success():
+            raise RuntimeError(
+                f"Feishu resolve user failed: code={response.code}, msg={response.msg}, log_id={response.get_log_id()}"
+            )
+        users = response.data.user_list if response.data else []
+        if not users or not users[0].user_id:
+            raise RuntimeError("Feishu returned no user for the configured email")
+        return users[0].user_id
 
     def send_text(self, receive_id: str, text: str, receive_id_type: str = "open_id") -> str:
         request = (
@@ -84,4 +102,3 @@ class FeishuOpenAPI:
                 f"Feishu send card failed: code={response.code}, msg={response.msg}, log_id={response.get_log_id()}"
             )
         return response.data.message_id if response.data else ""
-

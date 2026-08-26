@@ -11,6 +11,9 @@ def main() -> None:
     receive_id = os.environ["FEISHU_TEST_RECEIVE_ID"]
     receive_id_type = os.getenv("FEISHU_RECEIVE_ID_TYPE", "open_id")
     api = FeishuOpenAPI()
+    if receive_id_type == "email":
+        receive_id = api.resolve_user_open_id_by_email(receive_id)
+        receive_id_type = "open_id"
     message_id = api.send_interactive_card(
         receive_id,
         task_assignment_card(
@@ -27,4 +30,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
