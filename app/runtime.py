@@ -149,6 +149,62 @@ class WorkflowRuntime:
         for project in self.repository.projects.values():
             nodes = {node.definition_id: node for node in self.repository.list_project_nodes(project.id)}
             current = self.repository.get_node(project.current_node_id) if project.current_node_id else None
+            definitions = list(self.definitions.values())
+            node_rows = []
+            for definition in definitions:
+                node = nodes.get(definition.id)
+                events = []
+                if node:
+                    events = [
+                        {
+                            "type": event.event_type,
+                            "actor": event.actor_user_id,
+                            "created_at": event.created_at.isoformat(),
+                        }
+                        for event in self.repository.events
+                        if event.project_id == project.id and event.node_instance_id == node.id
+                    ]
+                node_rows.append(
+                    {
+                        "id": definition.id,
+                        "name": definition.name,
+                        "stage": definition.stage,
+                        "status": node.status.value if node else "pending",
+                        "owner_role": definition.owner_role,
+                        "owner_user_id": node.owner_user_id if node else self.assignments.get(definition.owner_role, ""),
+                        "reviewer_user_id": node.reviewer_user_id if node else self.assignments.get(definition.reviewer_role or definition.owner_role, ""),
+                        "started_at": node.started_at.isoformat() if node and node.started_at else None,
+                        "submitted_at": node.submitted_at.isoformat() if node and node.submitted_at else None,
+                        "completed_at": node.completed_at.isoformat() if node and node.completed_at else None,
+                        "events": events,
+                    }
+                )
+            stage_names = []
+            for row in node_rows:
+                if row["stage"] not in stage_names:
+                    stage_names.append(row["stage"])
+            stages = []
+            current_stage = current.definition_id if current else None
+            current_stage_name = next((row["stage"] for row in node_rows if row["id"] == current_stage), None)
+            for stage_name in stage_names:
+                stage_nodes = [row for row in node_rows if row["stage"] == stage_name]
+                completed = sum(row["status"] == "completed" for row in stage_nodes)
+                if completed == len(stage_nodes):
+                    stage_status = "completed"
+                elif stage_name == current_stage_name:
+                    stage_status = "current"
+                else:
+                    stage_status = "upcoming"
+                stages.append(
+                    {
+                        "name": stage_name,
+                        "status": stage_status,
+                        "completed": completed,
+                        "total": len(stage_nodes),
+                        "nodes": stage_nodes,
+                    }
+                )
+            current_index = next((index for index, row in enumerate(node_rows) if row["id"] == current_stage), None)
             result.append(
                 {
                     "id": project.id,
@@ -161,16 +217,12 @@ class WorkflowRuntime:
                     "current_node_name": self.definitions[current.definition_id].name if current else "已完成",
                     "completed": sum(node.status.value == "completed" for node in nodes.values()),
                     "total": len(self.definitions),
-                    "nodes": [
-                        {
-                            "id": definition_id,
-                            "name": definition.name,
-                            "stage": definition.stage,
-                            "status": nodes[definition_id].status.value if definition_id in nodes else "pending",
-                            "owner_role": definition.owner_role,
-                        }
-                        for definition_id, definition in self.definitions.items()
-                    ],
+                    "current_stage": current_stage_name,
+                    "previous_node": node_rows[current_index - 1] if current_index is not None and current_index > 0 else None,
+                    "current_node": node_rows[current_index] if current_index is not None else None,
+                    "next_node": node_rows[current_index + 1] if current_index is not None and current_index + 1 < len(node_rows) else None,
+                    "nodes": node_rows,
+                    "stages": stages,
                 }
             )
         return result
