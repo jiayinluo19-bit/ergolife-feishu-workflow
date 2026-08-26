@@ -28,4 +28,6 @@ async def feishu_events(request: Request) -> dict[str, Any]:
 @app.post("/api/feishu/card-actions")
 async def feishu_card_actions(request: Request) -> dict[str, Any]:
     payload = await request.json()
+    if is_url_verification(payload):
+        return url_verification_response(payload)
     return {"status": "accepted", "action": extract_card_action(payload)}
