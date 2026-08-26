@@ -1,0 +1,7 @@
+products:
+  - product_code: MOCK-2026-001
+    product_name: ERGOLIFE 人体工学办公椅 X1
+    target_market: 美国
+    sales_channel: Amazon US
+    owner_user_id: mock_product_manager
+

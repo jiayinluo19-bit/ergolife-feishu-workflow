@@ -1,0 +1,12 @@
+roles:
+  - {role: product_manager, department: 产品部, user_id: mock_product_manager, display_name: 测试产品经理}
+  - {role: procurement_owner, department: 采购部, user_id: mock_procurement_owner, display_name: 测试采购负责人}
+  - {role: supplier_owner, department: 供应商协同, user_id: mock_supplier_owner, display_name: 测试供应商负责人}
+  - {role: quality_reviewer, department: 品质部, user_id: mock_quality_reviewer, display_name: 测试品质负责人}
+  - {role: design_owner, department: 设计部, user_id: mock_design_owner, display_name: 测试设计负责人}
+  - {role: logistics_owner, department: 物流部, user_id: mock_logistics_owner, display_name: 测试物流负责人}
+  - {role: warehouse_owner, department: 海外仓, user_id: mock_warehouse_owner, display_name: 测试仓储负责人}
+  - {role: operations_owner, department: 运营部, user_id: mock_operations_owner, display_name: 测试运营负责人}
+  - {role: fulfillment_owner, department: 履约部, user_id: mock_fulfillment_owner, display_name: 测试履约负责人}
+  - {role: aftersales_owner, department: 售后部, user_id: mock_aftersales_owner, display_name: 测试售后负责人}
+
