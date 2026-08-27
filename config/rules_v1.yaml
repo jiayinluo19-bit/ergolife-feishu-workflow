@@ -1,0 +1,22 @@
+version: "1.0"
+rules:
+  - {id: R001, category: 触发类型, rule: 结果触发, definition: "上一个节点评审通过、文件批准、Golden Sample冻结等", purpose: 用于节点放行}
+  - {id: R002, category: 节点标准, rule: 完成定义, definition: "动作完成不等于节点完成；必须满足输出物+验收标准+下一步正式触发", purpose: 防止流程断点}
+  - {id: R003, category: 状态, rule: 进行中, definition: "已正式触发且责任人正在执行", purpose: 流程状态}
+  - {id: R004, category: 状态, rule: 待协同, definition: "主责已启动，等待其他部门动作", purpose: 流程状态}
+  - {id: R005, category: 触发类型, rule: 事件触发, definition: "样品到货、订单产生、船舶开航、货物到仓等客观事件发生", purpose: 用于飞书自动化条件}
+  - {id: R006, category: 责任标准, rule: 发起人, definition: "负责正式启动节点/任务的人，不一定等于执行人", purpose: 明确谁发起}
+  - {id: R007, category: 状态, rule: 异常, definition: "延期/FAIL/资料缺失/资源冲突等", purpose: 流程状态}
+  - {id: R008, category: 状态, rule: 未开始, definition: "尚未被正式触发", purpose: 流程状态}
+  - {id: R009, category: 触发类型, rule: 阈值触发, definition: "库存天数、售后问题数量/比例、延期天数等达到预设值", purpose: 用于预警与异常}
+  - {id: R010, category: 库存阈值, rule: 60天, definition: "提醒级，可开始准备补货", purpose: 后续按SKU调整}
+  - {id: R011, category: 责任标准, rule: 主责人/主责部门, definition: "对本节点最终结果负责", purpose: 避免多部门协同后无人收口}
+  - {id: R012, category: 样品闸门, rule: PP Sample, definition: "判断这是不是我们最终要卖给消费者的商品", purpose: 第二次样品评审}
+  - {id: R013, category: 样品闸门, rule: 大货随机抽检, definition: "判断工厂实际生产是否与Golden Sample一致", purpose: 第三次质量闸门}
+  - {id: R014, category: 样品闸门, rule: 供应商初样, definition: "判断这个产品值不值得继续开发", purpose: 第一次样品评审}
+  - {id: R015, category: 状态, rule: 已完成, definition: "节点验收通过且已触发下一步", purpose: 流程状态}
+  - {id: R016, category: 库存阈值, rule: 45天, definition: "必须提交补货建议", purpose: 后续按SKU调整}
+  - {id: R017, category: 优先级, rule: 中, definition: "重要协同动作但短时不阻塞主线", purpose: 任务优先级}
+  - {id: R018, category: 库存阈值, rule: 30天, definition: "高风险库存预警", purpose: 后续按SKU调整}
+  - {id: R019, category: 状态, rule: 待评审, definition: "各分支完成，等待共同评审/验收", purpose: 流程状态}
+  - {id: R020, category: 优先级, rule: 高, definition: "关键主线/会阻塞下一节点", purpose: 任务优先级}

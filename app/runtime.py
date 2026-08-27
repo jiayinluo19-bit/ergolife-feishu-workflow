@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from .config_loader import load_assignments, load_definitions
+from .config_loader import load_actions, load_assignments, load_definitions, load_rules
 from .domain.models import ProductProject
 from .repositories.memory_repository import MemoryRepository
 from .services.workflow_service import WorkflowService
@@ -15,7 +15,15 @@ class WorkflowRuntime:
 
     def __init__(self) -> None:
         self.repository = MemoryRepository()
+        database_url = os.getenv("DATABASE_URL", "").strip()
+        repository_mode = os.getenv("WORKFLOW_REPOSITORY", "auto").strip().lower()
+        if repository_mode == "postgres" or (repository_mode == "auto" and database_url):
+            from .repositories.postgres_repository import PostgresRepository
+
+            self.repository = PostgresRepository(database_url)
         self.definitions = load_definitions(ROOT / "config" / "workflow_v1.yaml")
+        self.actions = load_actions(ROOT / "config" / "actions_v1.yaml")
+        self.rules = load_rules(ROOT / "config" / "rules_v1.yaml")
         self.assignments = load_assignments(ROOT / "config" / "role_mapping.mock.yaml")
         configured_user = os.getenv("FEISHU_TEST_RECEIVE_ID", "").strip()
         if os.getenv("FEISHU_RECEIVE_ID_TYPE", "open_id") == "open_id" and configured_user:
@@ -68,17 +76,27 @@ class WorkflowRuntime:
         self.service.create_project(project, owner)
         if initial_node_id:
             node = self.repository.get_node(project.current_node_id)
-            del self.repository.nodes[node.id]
+            self.repository.delete_node(node.id)
             node.id = initial_node_id
             self.repository.save_node(node)
             project.current_node_id = node.id
             self.repository.save_project(project)
         for _ in range(completed_nodes):
             node = self.repository.get_node(project.current_node_id)
+            if node.status.value == "pending":
+                self.service.activate(node.id, owner, self._mock_trigger_context(self.definitions[node.definition_id]))
             self.service.claim(node.id, node.owner_user_id)
             definition = self.definitions[node.definition_id]
             self.service.submit(node.id, node.owner_user_id, definition.required_outputs)
             self.service.accept(node.id, node.reviewer_user_id)
+
+    @staticmethod
+    def _mock_trigger_context(definition) -> dict:
+        if definition.trigger_type.value == "event":
+            return {"event": definition.trigger_event}
+        if definition.trigger_type.value == "threshold":
+            return {definition.trigger_metric: definition.trigger_value}
+        return {"result": "accepted"}
 
     def project_summary(self, project_id: str) -> str:
         project = self.repository.get_project(project_id)
@@ -87,7 +105,7 @@ class WorkflowRuntime:
         current = self.repository.get_node(project.current_node_id) if project.current_node_id else None
         if current:
             definition = self.definitions[current.definition_id]
-            current_text = f"当前节点：{current.definition_id} {definition.name}（{current.status.value}）"
+            current_text = f"当前节点：{current.definition_id} {definition.name}（{self._source_status(current.status.value)}）"
             owner_text = f"负责人：{current.owner_user_id}"
         else:
             current_text = "当前节点：已完成"
@@ -109,6 +127,8 @@ class WorkflowRuntime:
 
     def simulate_complete(self, node_id: str, operator_user_id: str):
         node = self.repository.get_node(node_id)
+        if node.status.value == "pending":
+            node = self.service.activate(node.id, operator_user_id, self._mock_trigger_context(self.definitions[node.definition_id]))
         if node.status.value == "ready":
             node = self.claim_node(node_id, operator_user_id)
         if node.status.value == "in_progress":
@@ -118,6 +138,11 @@ class WorkflowRuntime:
             node = self.service.accept(node.id, node.reviewer_user_id)
         project = self.repository.get_project(node.project_id)
         return node, project
+
+    def trigger_node(self, node_id: str, operator_user_id: str):
+        node = self.repository.get_node(node_id)
+        definition = self.definitions[node.definition_id]
+        return self.service.activate(node.id, operator_user_id, self._mock_trigger_context(definition))
 
     def current_card_data(self, project_id: str) -> dict[str, str] | None:
         project = self.repository.get_project(project_id)
@@ -131,6 +156,10 @@ class WorkflowRuntime:
             "product_name": project.product_name,
             "node_name": f"{node.definition_id} {definition.name}",
             "owner_name": f"模拟角色：{definition.owner_role}",
+            "node_status": node.status.value,
+            "source_status": self._source_status(node.status.value),
+            "trigger_type": definition.trigger_type.value,
+            "trigger_condition": definition.trigger_condition,
         }
 
     def lifecycle_lines(self, project_id: str) -> list[str]:
@@ -141,7 +170,7 @@ class WorkflowRuntime:
             node = nodes.get(definition_id)
             status = node.status.value if node else "pending"
             icon = {"completed": "✅", "in_progress": "🔵", "ready": "🟡", "reviewing": "🟣", "rejected": "🔴"}.get(status, "⚪")
-            lines.append(f"{icon} {definition_id} {definition.name}｜{status}")
+            lines.append(f"{icon} {definition_id} {definition.name}｜{self._source_status(status)}")
         return lines
 
     def dashboard_data(self) -> list[dict]:
@@ -170,6 +199,7 @@ class WorkflowRuntime:
                         "name": definition.name,
                         "stage": definition.stage,
                         "status": node.status.value if node else "pending",
+                        "source_status": self._source_status(node.status.value if node else "pending"),
                         "owner_role": definition.owner_role,
                         "owner_user_id": node.owner_user_id if node else self.assignments.get(definition.owner_role, ""),
                         "reviewer_user_id": node.reviewer_user_id if node else self.assignments.get(definition.reviewer_role or definition.owner_role, ""),
@@ -177,6 +207,17 @@ class WorkflowRuntime:
                         "submitted_at": node.submitted_at.isoformat() if node and node.submitted_at else None,
                         "completed_at": node.completed_at.isoformat() if node and node.completed_at else None,
                         "events": events,
+                        "trigger_type": definition.trigger_type.value,
+                        "trigger_condition": definition.trigger_condition,
+                        "trigger_event": definition.trigger_event,
+                        "trigger_metric": definition.trigger_metric,
+                        "trigger_operator": definition.trigger_operator,
+                        "trigger_value": definition.trigger_value,
+                        "initiator": definition.initiator,
+                        "handoff": definition.handoff,
+                        "action_ids": definition.action_ids,
+                        "actions": [self.actions[action_id].model_dump(mode="json") for action_id in definition.action_ids if action_id in self.actions],
+                        "outcome_options": definition.outcome_options,
                     }
                 )
             stage_names = []
@@ -223,9 +264,23 @@ class WorkflowRuntime:
                     "next_node": node_rows[current_index + 1] if current_index is not None and current_index + 1 < len(node_rows) else None,
                     "nodes": node_rows,
                     "stages": stages,
+                    "rules": [rule.model_dump(mode="json") for rule in self.rules.values()],
                 }
             )
         return result
+
+    @staticmethod
+    def _source_status(status: str) -> str:
+        return {
+            "pending": "未开始",
+            "ready": "未开始",
+            "in_progress": "进行中",
+            "reviewing": "待评审",
+            "completed": "已完成",
+            "rejected": "异常",
+            "blocked": "异常",
+            "cancelled": "异常",
+        }.get(status, status)
 
 
 runtime = WorkflowRuntime()

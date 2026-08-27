@@ -6,11 +6,28 @@
 
 - P01～P22 全部节点配置化
 - V1 默认串行，保留 `execution_mode`、`depends_on`、`next_nodes` 以支持后续并行
-- 33个动作作为节点内部交付物/检查项的来源
+- `config/actions_v1.yaml` 已导入 Base 中的 33 个动作明细
+- 节点已记录事件/结果/阈值三类触发条件；事件/阈值节点在触发前保持“未开始”
+- P22 补货预警完成后回到 P12，形成补货周期闭环
 - 根据业务角色分配模拟负责人
 - 支持领取、提交、验收、退回、重新提交
 - 支持项目完成和审计事件
 - 预留 MemoryRepository → Feishu Bitable → 正式数据库的替换边界
+
+## PostgreSQL 演示环境
+
+设置 `DATABASE_URL` 后，运行时会自动使用 PostgreSQL，并在启动时创建
+`workflow_projects`、`workflow_nodes`、`workflow_events` 三张表；首次启动还会写入三条演示商品。
+未设置该变量时继续使用内存仓储，便于本地单元测试。
+
+Railway 中建议在应用服务的 Variables 里添加 PostgreSQL 服务变量引用：
+
+```text
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+WORKFLOW_REPOSITORY=auto
+```
+
+其中 `Postgres` 替换为你在 Railway 中实际显示的数据库服务名。不要把连接串提交到 Git。
 
 ## 本地运行
 

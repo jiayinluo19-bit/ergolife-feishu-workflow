@@ -66,7 +66,7 @@ def test_feishu_settings_require_secret():
 def test_dashboard_groups_stages_and_exposes_current_context():
     project = next(item for item in runtime.dashboard_data() if item["id"] == "PRJ-MOCK-003")
     assert project["current_node_id"] == "P12"
-    assert project["current_stage"] == "采购量产与质量"
+    assert project["current_stage"] == "量产与质量"
     assert project["previous_node"]["id"] == "P11"
     assert project["next_node"]["id"] == "P13"
     assert len(project["stages"]) == 6

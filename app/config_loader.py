@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from .domain.models import NodeDefinition, RoleAssignment
+from .domain.models import ActionDefinition, NodeDefinition, RoleAssignment, RuleDefinition
 
 
 def load_definitions(path: Path) -> dict[str, NodeDefinition]:
@@ -15,3 +15,12 @@ def load_assignments(path: Path) -> dict[str, str]:
     assignments = [RoleAssignment.model_validate(item) for item in raw["roles"]]
     return {item.role: item.user_id for item in assignments}
 
+
+def load_actions(path: Path) -> dict[str, ActionDefinition]:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return {item["id"]: ActionDefinition.model_validate(item) for item in raw["actions"]}
+
+
+def load_rules(path: Path) -> dict[str, RuleDefinition]:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return {item["id"]: RuleDefinition.model_validate(item) for item in raw["rules"]}

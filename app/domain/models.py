@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from .enums import NodeStatus, ProjectStatus
+from .enums import NodeStatus, ProjectStatus, TriggerType
 
 
 def utcnow() -> datetime:
@@ -26,6 +26,42 @@ class NodeDefinition(BaseModel):
     warning_before_hours: int = 8
     approval_required: bool = False
     next_nodes: list[str] = Field(default_factory=list)
+    trigger_type: TriggerType = TriggerType.RESULT
+    trigger_condition: str = ""
+    trigger_event: str | None = None
+    trigger_metric: str | None = None
+    trigger_operator: str | None = None
+    trigger_value: float | None = None
+    initiator: str | None = None
+    handoff: str | None = None
+    action_ids: list[str] = Field(default_factory=list)
+    deliverable_labels: dict[str, str] = Field(default_factory=dict)
+    outcome_options: list[str] = Field(default_factory=list)
+
+
+class ActionDefinition(BaseModel):
+    """One of the 33 atomic actions from the Base action-detail table."""
+
+    id: str
+    node_id: str
+    name: str
+    trigger_condition: str
+    owner_role: str
+    owner_title: str
+    collaborator_departments: list[str] = Field(default_factory=list)
+    required_outputs: list[str] = Field(default_factory=list)
+    acceptance_criteria: str
+    next_action: str
+    handoff: str
+    sla: str
+
+
+class RuleDefinition(BaseModel):
+    id: str
+    category: str
+    rule: str
+    definition: str
+    purpose: str
 
 
 class RoleAssignment(BaseModel):
@@ -73,4 +109,3 @@ class AuditEvent(BaseModel):
     actor_user_id: str
     detail: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utcnow)
-

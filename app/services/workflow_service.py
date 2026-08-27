@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from ..domain.enums import NodeStatus, ProjectStatus
+from ..domain.enums import NodeStatus, ProjectStatus, TriggerType
 from ..domain.models import AuditEvent, NodeDefinition, NodeInstance, ProductProject
 from ..repositories.interfaces import Repository
 
@@ -39,6 +39,24 @@ class WorkflowService:
         self._record(node.project_id, "node_claimed", actor_user_id, {}, node.id)
         return node
 
+    def activate(self, node_id: str, actor_user_id: str, context: dict | None = None) -> NodeInstance:
+        """Turn a not-yet-triggered event/threshold node into a claimable task."""
+        node = self.repository.get_node(node_id)
+        self._ensure_status(node, NodeStatus.PENDING)
+        definition = self.definitions[node.definition_id]
+        if not self._trigger_matches(definition, context or {}):
+            raise WorkflowError(f"触发条件未满足: {definition.trigger_condition}")
+        node.status = NodeStatus.READY
+        self.repository.save_node(node)
+        self._record(
+            node.project_id,
+            "node_triggered",
+            actor_user_id,
+            {"trigger_type": definition.trigger_type.value, "context": context or {}},
+            node.id,
+        )
+        return node
+
     def submit(self, node_id: str, actor_user_id: str, outputs: list[str], note: str = "") -> NodeInstance:
         node = self.repository.get_node(node_id)
         self._ensure_status(node, NodeStatus.IN_PROGRESS)
@@ -66,7 +84,9 @@ class WorkflowService:
         definition = self.definitions[node.definition_id]
         self._record(project.id, "node_accepted", actor_user_id, {}, node.id)
         if definition.next_nodes:
-            self._create_node(project, self.definitions[definition.next_nodes[0]], actor_user_id)
+            next_definition = self.definitions[definition.next_nodes[0]]
+            next_status = NodeStatus.READY if next_definition.trigger_type == TriggerType.RESULT else NodeStatus.PENDING
+            self._create_node(project, next_definition, actor_user_id, initial_status=next_status)
         else:
             project.current_node_id = None
             project.status = ProjectStatus.COMPLETED
@@ -122,7 +142,14 @@ class WorkflowService:
         self._record(project.id, "node_unblocked", actor_user_id, {}, node.id)
         return node
 
-    def _create_node(self, project: ProductProject, definition: NodeDefinition, actor_user_id: str) -> NodeInstance:
+    def _create_node(
+        self,
+        project: ProductProject,
+        definition: NodeDefinition,
+        actor_user_id: str,
+        *,
+        initial_status: NodeStatus = NodeStatus.READY,
+    ) -> NodeInstance:
         if definition.depends_on:
             for dependency in definition.depends_on:
                 dep_nodes = [n for n in self.repository.list_project_nodes(project.id) if n.definition_id == dependency]
@@ -135,7 +162,7 @@ class WorkflowService:
         node = NodeInstance(
             project_id=project.id,
             definition_id=definition.id,
-            status=NodeStatus.READY,
+            status=initial_status,
             owner_user_id=owner,
             reviewer_user_id=reviewer,
             collaborator_user_ids=[self.assignments[r] for r in definition.collaborator_roles if r in self.assignments],
@@ -146,6 +173,31 @@ class WorkflowService:
         self.repository.save_project(project)
         self._record(project.id, "node_created", actor_user_id, {"definition_id": definition.id}, node.id)
         return node
+
+    def _trigger_matches(self, definition: NodeDefinition, context: dict) -> bool:
+        if definition.trigger_type == TriggerType.RESULT:
+            return str(context.get("result", "accepted")).lower() in {"accepted", "approved", "pass", "completed"}
+        if definition.trigger_type == TriggerType.EVENT:
+            return bool(definition.trigger_event) and context.get("event") == definition.trigger_event
+        if definition.trigger_type == TriggerType.THRESHOLD:
+            if not definition.trigger_metric or definition.trigger_metric not in context:
+                return False
+            try:
+                actual = float(context[definition.trigger_metric])
+                expected = float(definition.trigger_value) if definition.trigger_value is not None else None
+            except (TypeError, ValueError):
+                return False
+            if expected is None:
+                return False
+            operators = {
+                "<": lambda: actual < expected,
+                "<=": lambda: actual <= expected,
+                "=": lambda: actual == expected,
+                ">=": lambda: actual >= expected,
+                ">": lambda: actual > expected,
+            }
+            return operators.get(definition.trigger_operator or "<=", lambda: False)()
+        return False
 
     def _first_definition(self) -> NodeDefinition:
         roots = [d for d in self.definitions.values() if not d.depends_on]
@@ -167,4 +219,3 @@ class WorkflowService:
 
     def _record(self, project_id: str, event_type: str, actor_user_id: str, detail: dict, node_id: str | None = None) -> None:
         self.repository.add_event(AuditEvent(project_id=project_id, node_instance_id=node_id, event_type=event_type, actor_user_id=actor_user_id, detail=detail))
-

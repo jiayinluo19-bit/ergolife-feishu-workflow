@@ -17,7 +17,8 @@ def _render_dashboard(projects: list[dict], selected_project_id: str | None) -> 
     selected = next((p for p in projects if p["id"] == selected_project_id), projects[0] if projects else None)
     if not selected:
         return "<h1>ERGOLIFE 生命周期看板</h1><p>暂无商品项目</p>"
-    status_labels = {"completed": "已完成", "current": "当前阶段", "upcoming": "未开始", "ready": "待领取", "in_progress": "进行中", "reviewing": "待验收", "pending": "未开始", "rejected": "已退回"}
+    status_labels = {"completed": "已完成", "current": "当前阶段", "upcoming": "未开始", "ready": "未开始", "in_progress": "进行中", "reviewing": "待评审", "pending": "未开始", "rejected": "异常", "blocked": "异常", "cancelled": "异常"}
+    trigger_labels = {"event": "事件触发", "result": "结果触发", "threshold": "阈值触发"}
     selected_id = selected["id"]
     product_cards = "".join(
         f'<a class="product {"selected" if p["id"] == selected_id else ""}" href="/dashboard?project_id={html.escape(p["id"])}">'
@@ -34,9 +35,9 @@ def _render_dashboard(projects: list[dict], selected_project_id: str | None) -> 
     def context_card(label: str, node: dict | None, tone: str) -> str:
         if not node:
             return f'<div class="context-card empty"><span>{label}</span><strong>暂无</strong><small>生命周期起点或终点</small></div>'
-        return f'<div class="context-card {tone}"><span>{label}</span><strong>{html.escape(node["id"])} {html.escape(node["name"])}</strong><small>{html.escape(status_labels.get(node["status"], node["status"]))} · {html.escape(node["owner_role"])}</small></div>'
+        return f'<div class="context-card {tone}"><span>{label}</span><strong>{html.escape(node["id"])} {html.escape(node["name"])}</strong><small>{html.escape(node.get("source_status", status_labels.get(node["status"], node["status"])))} · {html.escape(node["owner_role"])}</small></div>'
 
-    event_labels = {"project_created": "项目创建", "node_created": "节点生成", "node_claimed": "领取任务", "node_submitted": "提交交付物", "node_accepted": "验收通过", "node_rejected": "退回修改", "node_reopened": "重新提交", "project_completed": "项目完成"}
+    event_labels = {"project_created": "项目创建", "node_created": "节点生成", "node_triggered": "触发条件成立", "node_claimed": "领取任务", "node_submitted": "提交交付物", "node_accepted": "验收通过", "node_rejected": "退回修改", "node_reopened": "重新提交", "project_completed": "项目完成"}
 
     def node_events(node: dict) -> str:
         if not node["events"]:
@@ -45,10 +46,11 @@ def _render_dashboard(projects: list[dict], selected_project_id: str | None) -> 
 
     stage_sections = ""
     for index, stage in enumerate(selected["stages"]):
-        nodes_html = "".join(
-            f'<div class="node-row {"current" if node["id"] == selected["current_node_id"] else ""}"><div class="node-main"><span class="node-status {html.escape(node["status"])}"></span><div><strong>{html.escape(node["id"])} {html.escape(node["name"])}</strong><small>{html.escape(node["owner_role"])} · {html.escape(status_labels.get(node["status"], node["status"]))}</small></div></div><details><summary>查看详情</summary><div class="node-detail"><div class="timeline">{node_events(node)}</div><div class="detail-meta">负责人：{html.escape(node["owner_user_id"])}<br>验收人：{html.escape(node["reviewer_user_id"])}<br>开始：{html.escape((node["started_at"] or "—").replace("T", " ")[:19])}<br>提交：{html.escape((node["submitted_at"] or "—").replace("T", " ")[:19])}<br>完成：{html.escape((node["completed_at"] or "—").replace("T", " ")[:19])}</div></div></details></div>'
-            for node in stage["nodes"]
-        )
+        def render_node(node: dict) -> str:
+            action_names = "、".join(action["name"] for action in node.get("actions", [])) or "暂无动作明细"
+            return f'<div class="node-row {"current" if node["id"] == selected["current_node_id"] else ""}"><div class="node-main"><span class="node-status {html.escape(node["status"])}"></span><div><strong>{html.escape(node["id"])} {html.escape(node["name"])}</strong><small>{html.escape(node["owner_role"])} · {html.escape(node.get("source_status", status_labels.get(node["status"], node["status"])))}</small></div></div><details><summary>查看详情</summary><div class="node-detail"><div class="timeline">{node_events(node)}</div><div class="detail-meta">负责人：{html.escape(node["owner_user_id"])}<br>验收人：{html.escape(node["reviewer_user_id"])}<br>触发：{html.escape(trigger_labels.get(node.get("trigger_type", ""), node.get("trigger_type", "—")))}<br>触发条件：{html.escape(node.get("trigger_condition") or "—")}<br>交棒给：{html.escape(node.get("handoff") or "—")}<br>动作：{html.escape(action_names)}<br>开始：{html.escape((node["started_at"] or "—").replace("T", " ")[:19])}<br>提交：{html.escape((node["submitted_at"] or "—").replace("T", " ")[:19])}<br>完成：{html.escape((node["completed_at"] or "—").replace("T", " ")[:19])}</div></div></details></div>'
+
+        nodes_html = "".join(render_node(node) for node in stage["nodes"])
         stage_sections += f'<details class="stage-panel" id="stage-{index}" {"open" if stage["status"] == "current" else ""}><summary><span><b>{html.escape(stage["name"])}</b><small>{stage["completed"]}/{stage["total"]} · {status_labels[stage["status"]]}</small></span><em>{"当前阶段" if stage["status"] == "current" else ""}</em></summary><div class="stage-nodes">{nodes_html}</div></details>'
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -132,6 +134,10 @@ async def feishu_card_actions(request: Request, background_tasks: BackgroundTask
         if action.get("action") == "claim":
             node = runtime.claim_node(action["node_instance_id"], action["operator_open_id"])
             content = f"任务已接收：{node.definition_id}，状态已变更为进行中"
+        elif action.get("action") == "trigger_node":
+            node = runtime.trigger_node(action["node_instance_id"], action["operator_open_id"])
+            content = f"触发条件已登记：{node.definition_id}，现在可以接受任务"
+            background_tasks.add_task(_send_next_card, action["project_id"], action["operator_open_id"])
         elif action.get("action") == "view_project":
             content = runtime.project_summary(action["project_id"])
             background_tasks.add_task(_send_lifecycle_card, action["project_id"], action["operator_open_id"])

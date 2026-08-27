@@ -19,6 +19,9 @@ class MemoryRepository(Repository):
         self.nodes[node.id] = node
         return node
 
+    def delete_node(self, node_id: str) -> None:
+        self.nodes.pop(node_id, None)
+
     def get_node(self, node_id: str) -> NodeInstance:
         return self.nodes[node_id]
 
@@ -28,4 +31,3 @@ class MemoryRepository(Repository):
     def add_event(self, event: AuditEvent) -> AuditEvent:
         self.events.append(event)
         return event
-

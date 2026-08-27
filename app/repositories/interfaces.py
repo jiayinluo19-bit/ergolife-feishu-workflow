@@ -14,6 +14,9 @@ class Repository(ABC):
     def save_node(self, node: NodeInstance) -> NodeInstance: ...
 
     @abstractmethod
+    def delete_node(self, node_id: str) -> None: ...
+
+    @abstractmethod
     def get_node(self, node_id: str) -> NodeInstance: ...
 
     @abstractmethod
@@ -21,4 +24,3 @@ class Repository(ABC):
 
     @abstractmethod
     def add_event(self, event: AuditEvent) -> AuditEvent: ...
-
