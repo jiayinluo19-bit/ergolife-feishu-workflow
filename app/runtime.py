@@ -63,6 +63,7 @@ class WorkflowRuntime:
         initial_node_id: str | None = None,
     ) -> None:
         if project_id in self.repository.projects:
+            self._advance_demo_project_to(project_id, completed_nodes)
             return
         owner = self.assignments["product_manager"]
         project = ProductProject(
@@ -81,10 +82,31 @@ class WorkflowRuntime:
             self.repository.save_node(node)
             project.current_node_id = node.id
             self.repository.save_project(project)
-        for _ in range(completed_nodes):
+        self._advance_demo_project_to(project_id, completed_nodes)
+
+    def _advance_demo_project_to(self, project_id: str, completed_nodes: int) -> None:
+        """Idempotently bring a demo project to its configured checkpoint.
+
+        PostgreSQL returns fresh model instances on every read, unlike the
+        in-memory repository. Reloading the project on every iteration keeps
+        the seeding logic correct for both repository implementations and also
+        repairs partially seeded demo rows after a deployment restart.
+        """
+        completed = sum(
+            node.status.value == "completed"
+            for node in self.repository.list_project_nodes(project_id)
+        )
+        for _ in range(max(0, completed_nodes - completed)):
+            project = self.repository.get_project(project_id)
+            if not project.current_node_id:
+                return
             node = self.repository.get_node(project.current_node_id)
             if node.status.value == "pending":
-                self.service.activate(node.id, owner, self._mock_trigger_context(self.definitions[node.definition_id]))
+                self.service.activate(
+                    node.id,
+                    node.owner_user_id,
+                    self._mock_trigger_context(self.definitions[node.definition_id]),
+                )
             self.service.claim(node.id, node.owner_user_id)
             definition = self.definitions[node.definition_id]
             self.service.submit(node.id, node.owner_user_id, definition.required_outputs)
