@@ -97,7 +97,8 @@ def _send_lifecycle_card(project_id: str, receive_id: str) -> None:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "ergolife-feishu-workflow"}
+    storage = "postgres" if runtime.repository.__class__.__name__ == "PostgresRepository" else "memory"
+    return {"status": "ok", "service": "ergolife-feishu-workflow", "storage": storage}
 
 
 @app.get("/")
