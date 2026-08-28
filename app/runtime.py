@@ -51,6 +51,7 @@ class WorkflowRuntime:
             known_roles=self.role_assignments.keys(),
             admin_open_ids=admin_open_ids,
         )
+        self.directory_sync_status: dict[str, object] = {"status": "idle", "fetched": 0, "synced": 0, "error": None}
         configured_user = os.getenv("FEISHU_TEST_RECEIVE_ID", "").strip()
         if os.getenv("FEISHU_RECEIVE_ID_TYPE", "open_id") == "open_id" and configured_user:
             self.assignments["product_manager"] = configured_user
@@ -389,16 +390,29 @@ class WorkflowRuntime:
         """One-shot tenant directory import, normally triggered by an admin."""
         from .integrations.feishu.client import FeishuOpenAPI
 
-        users = FeishuOpenAPI().list_directory_users()
-        for user in users:
-            self.sync_feishu_user(user)
-        return {"fetched": len(users), "synced": len(users)}
+        self.directory_sync_status = {"status": "running", "fetched": 0, "synced": 0, "error": None}
+        try:
+            users = FeishuOpenAPI().list_directory_users()
+            for user in users:
+                self.sync_feishu_user(user)
+            result = {"status": "succeeded", "fetched": len(users), "synced": len(users), "error": None}
+            self.directory_sync_status = result
+            return result
+        except Exception as exc:
+            self.directory_sync_status = {
+                "status": "failed",
+                "fetched": 0,
+                "synced": 0,
+                "error": str(exc)[:500],
+            }
+            raise
 
     def directory_admin_data(self) -> dict:
         return {
             "users": self.directory.list_users(),
             "role_rules": self.directory.list_role_rules(),
             "roles": [item["role"] for item in self.product_access.available_roles()],
+            "sync_status": self.directory_sync_status,
         }
 
     @staticmethod

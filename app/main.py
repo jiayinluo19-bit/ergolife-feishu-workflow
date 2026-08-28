@@ -244,16 +244,29 @@ def directory_admin_page(request: Request) -> HTMLResponse:
     return HTMLResponse(_render_directory_admin(runtime.directory_admin_data()))
 
 
+def _run_directory_sync() -> None:
+    try:
+        runtime.sync_all_feishu_users()
+    except Exception:
+        # The detailed error is retained in runtime.directory_sync_status and
+        # can be inspected by the administrator through the status endpoint.
+        return
+
+
 @app.get("/admin/directory/sync", response_class=HTMLResponse)
-def sync_directory_page(request: Request) -> HTMLResponse:
+def sync_directory_page(request: Request, background_tasks: BackgroundTasks) -> Response:
     try:
         _require_directory_admin(request)
-        result = runtime.sync_all_feishu_users()
-        return RedirectResponse(f"/admin/directory?sync={result['synced']}", status_code=303)
+        background_tasks.add_task(_run_directory_sync)
+        return RedirectResponse("/admin/directory?sync=started", status_code=303)
     except HTTPException as exc:
         return HTMLResponse(f"<h1>无法同步通讯录</h1><p>{html.escape(str(exc.detail))}</p>", status_code=exc.status_code)
-    except (RuntimeError, FeishuNotConfiguredError) as exc:
-        return HTMLResponse(f"<h1>通讯录同步失败</h1><p>{html.escape(str(exc))}</p>", status_code=502)
+
+
+@app.get("/api/admin/directory/sync-status")
+def directory_sync_status(request: Request) -> dict:
+    _require_directory_admin(request)
+    return runtime.directory_sync_status
 
 
 @app.get("/api/admin/directory")
