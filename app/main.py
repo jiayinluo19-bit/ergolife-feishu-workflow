@@ -265,6 +265,7 @@ def _run_directory_sync() -> None:
 def sync_directory_page(request: Request, background_tasks: BackgroundTasks) -> Response:
     try:
         _require_directory_admin(request)
+        runtime.directory_sync_status = {"status": "running", "fetched": 0, "synced": 0, "error": None}
         background_tasks.add_task(_run_directory_sync)
         return RedirectResponse("/admin/directory?sync=started", status_code=303)
     except HTTPException as exc:
