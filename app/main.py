@@ -59,7 +59,7 @@ def _render_product_workbench(data: dict, view: str, demo_role: str | None) -> s
     identity = html.escape(actor.get("display_name") or "未识别用户")
     login = '<a class="login" href="/auth/feishu/login">使用飞书身份登录</a>' if not actor.get("role") else f'<span class="login">已识别：{identity}</span>'
     if actor.get("is_admin"):
-        login += ' <a class="login" href="/admin/directory">管理角色</a>'
+        login += ' <a class="login" href="/admin/directory">管理角色</a> <a class="login" href="/admin/directory/sync">同步全员</a>'
     summary = data.get("summary", {})
     h5_auth_script = ""
     if os.getenv("FEISHU_APP_ID", "").strip():
@@ -242,6 +242,18 @@ def directory_admin_page(request: Request) -> HTMLResponse:
     except HTTPException as exc:
         return HTMLResponse(f"<h1>无法打开角色配置</h1><p>{html.escape(str(exc.detail))}</p>", status_code=exc.status_code)
     return HTMLResponse(_render_directory_admin(runtime.directory_admin_data()))
+
+
+@app.get("/admin/directory/sync", response_class=HTMLResponse)
+def sync_directory_page(request: Request) -> HTMLResponse:
+    try:
+        _require_directory_admin(request)
+        result = runtime.sync_all_feishu_users()
+        return RedirectResponse(f"/admin/directory?sync={result['synced']}", status_code=303)
+    except HTTPException as exc:
+        return HTMLResponse(f"<h1>无法同步通讯录</h1><p>{html.escape(str(exc.detail))}</p>", status_code=exc.status_code)
+    except (RuntimeError, FeishuNotConfiguredError) as exc:
+        return HTMLResponse(f"<h1>通讯录同步失败</h1><p>{html.escape(str(exc))}</p>", status_code=502)
 
 
 @app.get("/api/admin/directory")

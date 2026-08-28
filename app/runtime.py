@@ -385,6 +385,15 @@ class WorkflowRuntime:
             is_tenant_manager=bool(user.get("is_tenant_manager", False)),
         )
 
+    def sync_all_feishu_users(self) -> dict[str, int]:
+        """One-shot tenant directory import, normally triggered by an admin."""
+        from .integrations.feishu.client import FeishuOpenAPI
+
+        users = FeishuOpenAPI().list_directory_users()
+        for user in users:
+            self.sync_feishu_user(user)
+        return {"fetched": len(users), "synced": len(users)}
+
     def directory_admin_data(self) -> dict:
         return {
             "users": self.directory.list_users(),
