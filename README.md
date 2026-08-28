@@ -93,6 +93,9 @@ DEMO_MODE=true
 不是逐个配置员工）。页面可以维护部门规则、为特殊员工手工覆盖角色，并恢复自动匹配；
 保存后立即生效。
 
+在 `DEMO_MODE=true` 且未配置 `FEISHU_ADMIN_OPEN_IDS` 时，系统临时使用已有的
+`FEISHU_TEST_RECEIVE_ID` 作为演示管理员；切换到正式环境后不会继续使用这个兜底。
+
 机器人卡片中的工作台按钮使用 `https://applink.feishu.cn/client/web_app/open`，
 会唤起当前飞书应用的网页主页，而不是直接把 Railway 地址交给系统浏览器。
 网页主页在飞书客户端内会加载 H5 JS SDK，通过 `tt.requestAuthCode` 调用
