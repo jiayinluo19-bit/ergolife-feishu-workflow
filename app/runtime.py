@@ -2,8 +2,9 @@ import os
 import json
 from pathlib import Path
 
-from .config_loader import load_actions, load_assignments, load_definitions, load_role_assignments, load_rules
+from .config_loader import load_actions, load_assignments, load_definitions, load_role_assignments, load_role_rules, load_rules
 from .domain.models import ProductProject
+from .repositories.directory_repository import DirectoryRepository, role_rules_from_assignments
 from .repositories.memory_repository import MemoryRepository
 from .repositories.product_repository import ProductRepository
 from .services.product_access_service import ProductAccessService
@@ -29,6 +30,14 @@ class WorkflowRuntime:
         self.rules = load_rules(ROOT / "config" / "rules_v1.yaml")
         self.assignments = load_assignments(ROOT / "config" / "role_mapping.mock.yaml")
         self.role_assignments = load_role_assignments(ROOT / "config" / "role_mapping.mock.yaml")
+        directory_dsn = database_url if repository_mode != "memory" else ""
+        self.directory = DirectoryRepository(
+            directory_dsn,
+            role_rules=(
+                load_role_rules(ROOT / "config" / "role_rules.yaml")
+                or role_rules_from_assignments(self.role_assignments)
+            ),
+        )
         configured_user = os.getenv("FEISHU_TEST_RECEIVE_ID", "").strip()
         if os.getenv("FEISHU_RECEIVE_ID_TYPE", "open_id") == "open_id" and configured_user:
             self.assignments["product_manager"] = configured_user
@@ -59,6 +68,7 @@ class WorkflowRuntime:
             self.definitions,
             self.role_assignments,
             demo_mode=os.getenv("DEMO_MODE", "true").lower() in {"1", "true", "yes", "on"},
+            directory=self.directory,
         )
         self._ensure_mock_project()
 
@@ -338,6 +348,28 @@ class WorkflowRuntime:
         demo_role: str | None = None,
     ) -> dict:
         return self.product_access.advance_product(product_id, open_id=open_id, demo_role=demo_role)
+
+    def sync_feishu_user(self, user: dict) -> None:
+        """Project the Feishu login profile into the local employee directory."""
+        open_id = str(user.get("open_id") or "").strip()
+        if not open_id:
+            return
+        department_ids = user.get("department_ids") or []
+        department_names = user.get("department_names") or []
+        if isinstance(department_ids, str):
+            department_ids = [department_ids]
+        if isinstance(department_names, str):
+            department_names = [department_names]
+        self.directory.upsert_user(
+            open_id=open_id,
+            user_id=user.get("user_id"),
+            display_name=user.get("name") or user.get("en_name") or "未命名用户",
+            email=user.get("email") or user.get("enterprise_email"),
+            job_title=user.get("job_title"),
+            department_ids=department_ids,
+            department_names=department_names,
+            active=not bool(user.get("is_frozen", False)),
+        )
 
     @staticmethod
     def _source_status(status: str) -> str:

@@ -65,14 +65,28 @@ python scripts/send_test_card.py
 ```text
 PRODUCT_DATABASE_URL=${{ecommerce-postgres.DATABASE_URL}}
 DEMO_MODE=true
-FEISHU_ROLE_USER_MAP_JSON={"product_manager":"ou_xxx","quality_reviewer":"ou_yyy"}
 ```
 
 网页应用打开 `/dashboard` 后可以切换“我的商品 / 我参与的商品 / 全部商品”。
 在 `DEMO_MODE=true` 时页面还会显示部门角色切换器，方便用一个飞书账号演示
 产品、采购、品质、物流、仓储、运营等角色；正式上线前应关闭该开关并使用飞书
-OAuth 登录。登录入口为 `/auth/feishu/login`，回调地址为
+真实身份登录。登录入口为 `/auth/feishu/login`，回调地址为
 `/auth/feishu/callback`，两者都要加入飞书应用的安全设置。
+
+### 公司内部员工与角色
+
+员工从飞书网页应用打开工作台后，服务端会用 `tt.requestAuthCode` 获取当前员工的
+`open_id`，再通过飞书通讯录接口同步姓名、部门和岗位。服务端会在工作流数据库中
+维护三张目录表：
+
+- `directory_users`：飞书员工资料；
+- `lifecycle_role_rules`：部门名称/部门 ID 到生命周期角色的规则；
+- `directory_role_members`：员工与角色的多对多关系。
+
+应用启动时会从 `config/role_mapping.mock.yaml` 的部门字段写入默认角色规则；后续
+可增加管理员页面维护规则，不需要为每位员工增加 Railway 环境变量。交接时会把卡片
+发送给下一个角色的全部有效成员。生产环境建议设置 `DEMO_MODE=false` 和
+`ALLOW_QUERY_ACTOR=false`，这样权限只由真实飞书身份决定。
 
 机器人卡片中的工作台按钮使用 `https://applink.feishu.cn/client/web_app/open`，
 会唤起当前飞书应用的网页主页，而不是直接把 Railway 地址交给系统浏览器。

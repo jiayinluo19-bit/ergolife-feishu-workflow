@@ -26,6 +26,16 @@ def load_role_assignments(path: Path) -> dict[str, RoleAssignment]:
     return {item.role: item for item in assignments}
 
 
+def load_role_rules(path: Path) -> dict[str, str]:
+    """Load department key -> lifecycle role rules."""
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return {
+        str(item["department_key"]): str(item["role_code"])
+        for item in raw.get("rules", [])
+        if item.get("department_key") and item.get("role_code")
+    }
+
+
 def load_actions(path: Path) -> dict[str, ActionDefinition]:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     return {item["id"]: ActionDefinition.model_validate(item) for item in raw["actions"]}

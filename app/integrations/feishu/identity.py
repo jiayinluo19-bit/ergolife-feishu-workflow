@@ -75,7 +75,45 @@ class FeishuIdentity:
         open_id = user.get("open_id")
         if not open_id:
             raise FeishuIdentityError("飞书登录返回中没有 open_id")
+        # The auth endpoint supplies the identity, while the Contact API
+        # supplies department and job information used by role rules.  A
+        # missing Contact permission must not prevent a user from opening the
+        # workbench; they can be mapped later by an administrator.
+        try:
+            profile = self._get_user_profile(app_token, str(open_id))
+        except FeishuIdentityError:
+            profile = {}
+        if profile:
+            user = {**user, **profile}
         return user
+
+    def _get_user_profile(self, app_token: str, open_id: str) -> dict:
+        data = self._get_json(
+            "https://open.feishu.cn/open-apis/contact/v3/users/"
+            + open_id
+            + "?user_id_type=open_id&department_id_type=department_id",
+            headers={"Authorization": f"Bearer {app_token}"},
+        )
+        profile = data.get("data", {}).get("user") or data.get("user") or {}
+        if not isinstance(profile, dict):
+            return {}
+        department_path = profile.get("department_path") or []
+        department_names = profile.get("department_names") or []
+        department_ids = profile.get("department_ids") or []
+        if department_path and isinstance(department_path, list):
+            for item in department_path:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("department_id"):
+                    department_ids.append(str(item["department_id"]))
+                name = item.get("department_name")
+                if isinstance(name, dict):
+                    name = name.get("name") or name.get("zh_cn") or name.get("en_us")
+                if name:
+                    department_names.append(str(name))
+        profile["department_ids"] = list(dict.fromkeys(str(item) for item in department_ids if item))
+        profile["department_names"] = list(dict.fromkeys(str(item) for item in department_names if item))
+        return profile
 
     def sign_session(self, open_id: str) -> str:
         payload = base64.urlsafe_b64encode(
@@ -111,4 +149,16 @@ class FeishuIdentity:
             raise FeishuIdentityError(f"飞书登录接口调用失败: {exc}") from exc
         if body.get("code", 0) not in (0, "0"):
             raise FeishuIdentityError(f"飞书登录接口返回错误: {body.get('code')} {body.get('msg', '')}")
+        return body
+
+    @staticmethod
+    def _get_json(url: str, headers: dict[str, str] | None = None) -> dict:
+        request = UrlRequest(url, headers=headers or {}, method="GET")
+        try:
+            with urlopen(request, timeout=10) as response:
+                body = json.loads(response.read().decode())
+        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+            raise FeishuIdentityError(f"飞书通讯录接口调用失败: {exc}") from exc
+        if body.get("code", 0) not in (0, "0"):
+            raise FeishuIdentityError(f"飞书通讯录接口返回错误: {body.get('code')} {body.get('msg', '')}")
         return body

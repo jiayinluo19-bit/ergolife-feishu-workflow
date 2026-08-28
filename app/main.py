@@ -141,39 +141,28 @@ def _send_lifecycle_card(project_id: str, receive_id: str) -> None:
 
 def _send_product_handoff_card(product: dict) -> None:
     lifecycle = product.get("lifecycle", {})
-    next_owner = lifecycle.get("next_owner_user_id")
-    if not next_owner or not lifecycle.get("next_code"):
+    next_owners = list(lifecycle.get("next_owner_user_ids") or [])
+    if not next_owners and lifecycle.get("next_owner_user_id"):
+        next_owners = [lifecycle["next_owner_user_id"]]
+    if not next_owners or not lifecycle.get("next_code"):
         return
-    if runtime.product_access.demo_mode and str(next_owner).startswith("mock_"):
-        next_owner = os.getenv("FEISHU_TEST_RECEIVE_ID", "").strip()
-    if not next_owner:
+    if runtime.product_access.demo_mode and all(str(item).startswith("mock_") for item in next_owners):
+        test_receiver = os.getenv("FEISHU_TEST_RECEIVE_ID", "").strip()
+        next_owners = [test_receiver] if test_receiver else []
+    if not next_owners:
         return
+    card = product_handoff_card(
+        product_name=product.get("product_name", "未命名商品"),
+        sku=product.get("sku", ""),
+        current_node=lifecycle.get("node_code", ""),
+        next_node=f"{lifecycle['next_code']} {lifecycle.get('next_name', '')}".strip(),
+        next_owner=lifecycle.get("next_owner_name") or lifecycle.get("next_owner_role") or "下一节点负责人",
+    )
     try:
-        FeishuOpenAPI().send_interactive_card(
-            next_owner,
-            product_handoff_card(
-                product_name=product.get("product_name", "未命名商品"),
-                sku=product.get("sku", ""),
-                current_node=lifecycle.get("node_code", ""),
-                next_node=f"{lifecycle['next_code']} {lifecycle.get('next_name', '')}".strip(),
-                next_owner=lifecycle.get("next_owner_name") or lifecycle.get("next_owner_role") or "下一节点负责人",
-            ),
-        )
+        api = FeishuOpenAPI()
+        for next_owner in dict.fromkeys(str(item) for item in next_owners if item):
+            api.send_interactive_card(next_owner, card)
     except (FeishuNotConfiguredError, RuntimeError):
-        return
-    try:
-        project = runtime.repository.get_project(project_id)
-        lines = runtime.lifecycle_lines(project_id)
-        FeishuOpenAPI().send_interactive_card(
-            receive_id,
-            project_lifecycle_card(
-                product_name=project.product_name,
-                project_status=project.status.value,
-                progress=f"{sum(line.startswith('✅') for line in lines)}/22",
-                lines=lines,
-            ),
-        )
-    except (FeishuNotConfiguredError, KeyError, RuntimeError):
         return
 
 
@@ -186,6 +175,7 @@ def health() -> dict[str, str]:
         "service": "ergolife-feishu-workflow",
         "storage": storage,
         "product_storage": product_storage,
+        "directory_storage": runtime.directory.source,
         "demo_mode": str(runtime.product_access.demo_mode).lower(),
     }
 
@@ -257,6 +247,7 @@ def current_identity(request: Request) -> dict:
     return {
         "open_id": actor.open_id if open_id else None,
         "role": actor.role,
+        "roles": list(actor.roles),
         "department": actor.department,
         "display_name": actor.display_name,
         "authenticated": bool(open_id),
@@ -272,6 +263,7 @@ async def feishu_h5_auth(request: Request) -> dict:
         from fastapi import HTTPException
 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    runtime.sync_feishu_user(user)
     response = {"authenticated": True, "open_id": str(user["open_id"])}
     # Set-Cookie cannot be returned from a plain dict, so use the same response
     # shape as the browser OAuth callback below.
@@ -303,6 +295,7 @@ def feishu_callback(code: str, state: str) -> Response:
         user = feishu_identity.exchange_code(code, state)
     except FeishuIdentityError as exc:
         return HTMLResponse(f"<h1>飞书登录失败</h1><p>{html.escape(str(exc))}</p>", status_code=400)
+    runtime.sync_feishu_user(user)
     response = RedirectResponse("/dashboard", status_code=303)
     response.set_cookie(
         "ergolife_session",

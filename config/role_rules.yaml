@@ -1,0 +1,13 @@
+# 部门名称或飞书 department_id -> 生命周期角色。
+# 同一个部门可以配置多条规则；同一员工也可以因此拥有多个角色。
+rules:
+  - {department_key: 产品部, role_code: product_manager}
+  - {department_key: 采购部, role_code: procurement_owner}
+  - {department_key: 供应商协同, role_code: supplier_owner}
+  - {department_key: 品质部, role_code: quality_reviewer}
+  - {department_key: 设计部, role_code: design_owner}
+  - {department_key: 物流部, role_code: logistics_owner}
+  - {department_key: 海外仓, role_code: warehouse_owner}
+  - {department_key: 运营部, role_code: operations_owner}
+  - {department_key: 履约部, role_code: fulfillment_owner}
+  - {department_key: 售后部, role_code: aftersales_owner}

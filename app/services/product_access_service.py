@@ -8,6 +8,7 @@ from typing import Any
 
 from ..config_loader import load_role_assignments
 from ..domain.models import NodeDefinition, RoleAssignment
+from ..repositories.directory_repository import DirectoryRepository
 from ..repositories.product_repository import ProductRecord, ProductRepository
 
 
@@ -18,6 +19,7 @@ class ActorContext:
     department: str | None
     display_name: str
     demo: bool = False
+    roles: tuple[str, ...] = ()
 
 
 class ProductAccessService:
@@ -28,11 +30,13 @@ class ProductAccessService:
         roles: dict[str, RoleAssignment],
         *,
         demo_mode: bool = True,
+        directory: DirectoryRepository | None = None,
     ) -> None:
         self.repository = repository
         self.definitions = definitions
         self.roles = roles
         self.demo_mode = demo_mode
+        self.directory = directory
         self._ordered_codes = list(definitions)
         self._role_by_user = {assignment.user_id: role for role, assignment in roles.items()}
 
@@ -46,12 +50,25 @@ class ProductAccessService:
                 department=assignment.department,
                 display_name=assignment.display_name,
                 demo=True,
+                roles=(demo_role,),
             )
+        if self.directory and open_id:
+            user = self.directory.get_user(open_id)
+            user_roles = tuple(role for role in self.directory.roles_for_user(open_id) if role in self.roles)
+            if user:
+                primary_role = user_roles[0] if user_roles else None
+                return ActorContext(
+                    open_id=open_id,
+                    role=primary_role,
+                    department=user.department_names[0] if user.department_names else (self.roles[primary_role].department if primary_role else None),
+                    display_name=user.display_name,
+                    roles=user_roles,
+                )
         role = self._role_by_user.get(open_id)
         if role:
             assignment = self.roles[role]
-            return ActorContext(open_id, role, assignment.department, assignment.display_name)
-        return ActorContext(open_id or "anonymous", None, None, "未识别用户")
+            return ActorContext(open_id, role, assignment.department, assignment.display_name, roles=(role,))
+        return ActorContext(open_id or "anonymous", None, None, "未识别用户", roles=())
 
     def available_roles(self) -> list[dict[str, str]]:
         return [
@@ -116,7 +133,7 @@ class ProductAccessService:
         if definition is None:
             raise ValueError(f"未识别生命周期节点: {product.lifecycle_node_code}")
         allowed_roles = {definition.owner_role, definition.reviewer_role or definition.owner_role, *definition.collaborator_roles}
-        if actor.role not in allowed_roles:
+        if not set(actor.roles).intersection(allowed_roles):
             raise PermissionError(f"当前角色不能操作 {definition.id}，负责人角色为 {definition.owner_role}")
         if not definition.next_nodes:
             raise ValueError("当前商品已经到达生命周期末端")
@@ -126,8 +143,10 @@ class ProductAccessService:
 
     def _enrich(self, product: ProductRecord, actor: ActorContext) -> dict[str, Any]:
         definition = self.definitions.get(product.lifecycle_node_code)
-        owner = self.roles.get(definition.owner_role) if definition else None
-        reviewer = self.roles.get(definition.reviewer_role or definition.owner_role) if definition else None
+        owner_members = self._members_for_role(definition.owner_role) if definition else []
+        reviewer_members = self._members_for_role(definition.reviewer_role or definition.owner_role) if definition else []
+        owner = owner_members[0] if owner_members else self.roles.get(definition.owner_role) if definition else None
+        reviewer = reviewer_members[0] if reviewer_members else self.roles.get(definition.reviewer_role or definition.owner_role) if definition else None
         participant_roles = set()
         if definition:
             participant_roles.update(definition.collaborator_roles)
@@ -136,7 +155,8 @@ class ProductAccessService:
         previous_code = self._ordered_codes[index - 1] if index > 0 else None
         next_code = definition.next_nodes[0] if definition and definition.next_nodes else None
         next_definition = self.definitions.get(next_code) if next_code else None
-        next_owner = self.roles.get(next_definition.owner_role) if next_definition else None
+        next_owner_members = self._members_for_role(next_definition.owner_role) if next_definition else []
+        next_owner = next_owner_members[0] if next_owner_members else self.roles.get(next_definition.owner_role) if next_definition else None
         deadline = self._deadline(product, definition)
         return {
             **product.as_dict(),
@@ -156,16 +176,42 @@ class ProductAccessService:
                 "next_owner_role": next_definition.owner_role if next_definition else None,
                 "next_owner_user_id": next_owner.user_id if next_owner else None,
                 "next_owner_name": next_owner.display_name if next_owner else None,
+                "next_owner_user_ids": [member.open_id for member in next_owner_members if member.open_id]
+                or ([next_owner.user_id] if next_owner and next_owner.user_id else []),
+                "next_owner_count": len(next_owner_members),
                 **deadline,
             },
             "access": {
-                "is_owner": bool(actor.role and definition and actor.role == definition.owner_role),
-                "is_reviewer": bool(actor.role and definition and actor.role == definition.reviewer_role),
-                "is_participant": bool(actor.role and actor.role in participant_roles),
-                "can_advance": bool(actor.role and actor.role in participant_roles and next_code),
+                "is_owner": bool(definition and definition.owner_role in actor.roles),
+                "is_reviewer": bool(definition and definition.reviewer_role and definition.reviewer_role in actor.roles),
+                "is_participant": bool(set(actor.roles).intersection(participant_roles)),
+                "can_advance": bool(set(actor.roles).intersection(participant_roles) and next_code),
                 "action_label": f"完成 {product.lifecycle_node_code} 并交接至 {next_code}" if next_code else "已完成",
             },
         }
+
+    def _members_for_role(self, role: str | None):
+        if not role:
+            return []
+        if self.directory:
+            members = self.directory.members_for_role(role)
+            if members:
+                return members
+        assignment = self.roles.get(role)
+        if not assignment:
+            return []
+        # Keep the existing mock RoleAssignment compatible with the directory
+        # member shape used by notifications and the UI.
+        from ..repositories.directory_repository import DirectoryUser
+
+        return [
+            DirectoryUser(
+                open_id=assignment.user_id,
+                user_id=assignment.user_id,
+                display_name=assignment.display_name,
+                department_names=(assignment.department,),
+            )
+        ]
 
     @staticmethod
     def _deadline(product: ProductRecord, definition: NodeDefinition | None) -> dict[str, Any]:
