@@ -74,6 +74,11 @@ FEISHU_ROLE_USER_MAP_JSON={"product_manager":"ou_xxx","quality_reviewer":"ou_yyy
 OAuth 登录。登录入口为 `/auth/feishu/login`，回调地址为
 `/auth/feishu/callback`，两者都要加入飞书应用的安全设置。
 
+机器人卡片中的工作台按钮使用 `https://applink.feishu.cn/client/web_app/open`，
+会唤起当前飞书应用的网页主页，而不是直接把 Railway 地址交给系统浏览器。
+网页主页在飞书客户端内会加载 H5 JS SDK，通过 `tt.requestAuthCode` 调用
+`/api/auth/feishu/h5` 建立当前用户会话；在普通浏览器中则保留 OAuth 登录入口。
+
 当前节点允许操作时，点击“完成并交接”会以乐观并发方式把商品的
 `lifecycle_node_code` 更新为节点定义中的 `next_nodes[0]`，因此下一部门马上能在
 “我的商品”看到它。后续接入完整交付物、附件和节点历史时，可以在此适配器上继续
