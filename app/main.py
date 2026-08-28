@@ -76,10 +76,18 @@ def _render_product_workbench(data: dict, view: str, demo_role: str | None) -> s
 def _render_directory_admin(data: dict) -> str:
     roles = data.get("roles", [])
     role_options = "".join(f'<option value="{html.escape(role)}">{html.escape(role)}</option>' for role in roles)
+    sync_status = data.get("sync_status") or {}
+    sync_label = {
+        "idle": "尚未同步",
+        "running": "正在后台同步，请稍后刷新",
+        "succeeded": f"同步完成：读取 {sync_status.get('fetched', 0)} 人，写入 {sync_status.get('synced', 0)} 人",
+        "failed": f"同步失败：{sync_status.get('error') or '请检查飞书通讯录权限'}",
+    }.get(str(sync_status.get("status") or "idle"), "同步状态未知")
     rule_rows = "".join(
         f'<tr><td>{html.escape(department)}</td><td>{html.escape(role)}</td><td><button class="danger" data-delete-rule="{html.escape(department)}">删除</button></td></tr>'
         for department, role in sorted(data.get("role_rules", {}).items())
     ) or '<tr><td colspan="3">暂无规则</td></tr>'
+    rule_rows = f'<tr><td colspan="3"><strong>通讯录同步：</strong>{html.escape(sync_label)}</td></tr>' + rule_rows
     user_rows = []
     for user in data.get("users", []):
         checks = "".join(
