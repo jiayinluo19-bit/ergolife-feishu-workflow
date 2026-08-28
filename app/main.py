@@ -229,6 +229,9 @@ def dashboard(
     actor_open_id: str | None = None,
 ) -> HTMLResponse:
     if project_id:
+        real_projects = runtime.real_lifecycle_dashboard_data(project_id)
+        if any(item.get("id") == project_id for item in real_projects):
+            return HTMLResponse(_render_dashboard(real_projects, project_id))
         return HTMLResponse(_render_dashboard(runtime.dashboard_data(), project_id))
     open_id = _current_open_id(request, actor_open_id)
     try:

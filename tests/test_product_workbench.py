@@ -49,3 +49,12 @@ def test_product_dashboard_api_supports_all_roles_for_demo():
     assert response.status_code == 200
     assert response.json()["actor"]["role"] == "quality_reviewer"
     assert response.json()["products"]
+
+
+def test_lifecycle_detail_uses_real_product_selector():
+    client = TestClient(app)
+    response = client.get("/lifecycle")
+    assert response.status_code == 200
+    assert "ERGOLIFE 商品全生命周期看板" in response.text
+    assert "PRJ-MOCK" not in response.text
+    assert response.text.count('class="product ') >= 2

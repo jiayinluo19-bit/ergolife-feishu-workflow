@@ -322,28 +322,56 @@ class WorkflowRuntime:
                 stage_status = "upcoming"
             stages.append({"name": stage, "status": stage_status, "completed": completed, "total": len(stage_nodes), "nodes": stage_nodes})
         current_node = nodes[current_index] if nodes else None
-        return [
-            {
-                "id": product.id,
-                "product_code": product.sku,
-                "product_name": product.product_name,
-                "target_market": product.country_code,
-                "sales_channel": product.store or "—",
-                "status": "active" if product.is_active else "inactive",
-                "current_node_id": current_code,
-                "current_node_name": self.definitions[current_code].name if current_code in self.definitions else "未配置节点",
-                "completed": sum(node["status"] == "completed" for node in nodes),
-                "total": len(nodes),
-                "current_stage": self.definitions[current_code].stage if current_code in self.definitions else "未配置阶段",
-                "previous_node": nodes[current_index - 1] if current_index > 0 and nodes else None,
-                "current_node": current_node,
-                "next_node": nodes[current_index + 1] if current_index + 1 < len(nodes) else None,
-                "nodes": nodes,
-                "stages": stages,
-                "rules": [rule.model_dump(mode="json") for rule in self.rules.values()],
-                "source": self.product_repository.last_source,
-            }
-        ]
+        selected_project = {
+            "id": product.id,
+            "product_code": product.sku,
+            "product_name": product.product_name,
+            "target_market": product.country_code,
+            "sales_channel": product.store or "—",
+            "status": "active" if product.is_active else "inactive",
+            "current_node_id": current_code,
+            "current_node_name": self.definitions[current_code].name if current_code in self.definitions else "未配置节点",
+            "completed": sum(node["status"] == "completed" for node in nodes),
+            "total": len(nodes),
+            "current_stage": self.definitions[current_code].stage if current_code in self.definitions else "未配置阶段",
+            "previous_node": nodes[current_index - 1] if current_index > 0 and nodes else None,
+            "current_node": current_node,
+            "next_node": nodes[current_index + 1] if current_index + 1 < len(nodes) else None,
+            "nodes": nodes,
+            "stages": stages,
+            "rules": [rule.model_dump(mode="json") for rule in self.rules.values()],
+            "source": self.product_repository.last_source,
+        }
+        # Keep every real product in the selector at the top of the detail
+        # page, while only expanding the selected product's 22-node detail.
+        result = [selected_project]
+        for item in products:
+            if item.id == product.id:
+                continue
+            item_index = ordered_codes.index(item.lifecycle_node_code) if item.lifecycle_node_code in ordered_codes else 0
+            result.append(
+                {
+                    "id": item.id,
+                    "product_code": item.sku,
+                    "product_name": item.product_name,
+                    "target_market": item.country_code,
+                    "sales_channel": item.store or "—",
+                    "status": "active" if item.is_active else "inactive",
+                    "current_node_id": item.lifecycle_node_code,
+                    "current_node_name": self.definitions[item.lifecycle_node_code].name if item.lifecycle_node_code in self.definitions else "未配置节点",
+                    "completed": item_index,
+                    "total": len(ordered_codes),
+                    "current_stage": self.definitions[item.lifecycle_node_code].stage if item.lifecycle_node_code in self.definitions else "未配置阶段",
+                    "previous_node": None,
+                    "current_node": None,
+                    "next_node": None,
+                    "nodes": [],
+                    "stages": [],
+                    "rules": [],
+                    "source": self.product_repository.last_source,
+                }
+            )
+        return result
 
     def dashboard_data(self) -> list[dict]:
         result = []
