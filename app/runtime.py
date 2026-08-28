@@ -249,6 +249,102 @@ class WorkflowRuntime:
             lines.append(f"{icon} {definition_id} {definition.name}｜{self._source_status(status)}")
         return lines
 
+    def real_lifecycle_dashboard_data(self, product_id: str | None = None) -> list[dict]:
+        """Adapt product_market_parameters rows to the detailed lifecycle view.
+
+        The product master currently stores the current lifecycle node, not a
+        separate node-event history.  We therefore derive node states from
+        that value and leave event lists empty until the history table exists.
+        """
+        products = self.product_repository.list_active(limit=500)
+        if not products:
+            return []
+        product = next((item for item in products if item.id == product_id), products[0])
+        ordered_codes = list(self.definitions)
+        current_code = product.lifecycle_node_code
+        current_index = ordered_codes.index(current_code) if current_code in ordered_codes else 0
+        nodes = []
+        for index, code in enumerate(ordered_codes):
+            definition = self.definitions[code]
+            assignment = self.role_assignments.get(definition.owner_role)
+            if code == current_code:
+                status = "in_progress"
+                owner_user_id = assignment.user_id if assignment else ""
+                started_at = product.updated_at
+            elif index < current_index:
+                status = "completed"
+                owner_user_id = assignment.user_id if assignment else ""
+                started_at = None
+            else:
+                status = "pending"
+                owner_user_id = assignment.user_id if assignment else ""
+                started_at = None
+            nodes.append(
+                {
+                    "id": code,
+                    "name": definition.name,
+                    "stage": definition.stage,
+                    "status": status,
+                    "source_status": self._source_status(status),
+                    "owner_role": definition.owner_role,
+                    "owner_user_id": owner_user_id,
+                    "reviewer_user_id": assignment.user_id if assignment else "",
+                    "started_at": started_at,
+                    "submitted_at": None,
+                    "completed_at": None,
+                    "events": [],
+                    "trigger_type": definition.trigger_type.value,
+                    "trigger_condition": definition.trigger_condition,
+                    "trigger_event": definition.trigger_event,
+                    "trigger_metric": definition.trigger_metric,
+                    "trigger_operator": definition.trigger_operator,
+                    "trigger_value": definition.trigger_value,
+                    "initiator": definition.initiator,
+                    "handoff": definition.handoff,
+                    "action_ids": definition.action_ids,
+                    "actions": [self.actions[action_id].model_dump(mode="json") for action_id in definition.action_ids if action_id in self.actions],
+                    "outcome_options": definition.outcome_options,
+                }
+            )
+        stage_names = []
+        for node in nodes:
+            if node["stage"] not in stage_names:
+                stage_names.append(node["stage"])
+        stages = []
+        for stage in stage_names:
+            stage_nodes = [node for node in nodes if node["stage"] == stage]
+            completed = sum(node["status"] == "completed" for node in stage_nodes)
+            if completed == len(stage_nodes):
+                stage_status = "completed"
+            elif stage == self.definitions[current_code].stage if current_code in self.definitions else False:
+                stage_status = "current"
+            else:
+                stage_status = "upcoming"
+            stages.append({"name": stage, "status": stage_status, "completed": completed, "total": len(stage_nodes), "nodes": stage_nodes})
+        current_node = nodes[current_index] if nodes else None
+        return [
+            {
+                "id": product.id,
+                "product_code": product.sku,
+                "product_name": product.product_name,
+                "target_market": product.country_code,
+                "sales_channel": product.store or "—",
+                "status": "active" if product.is_active else "inactive",
+                "current_node_id": current_code,
+                "current_node_name": self.definitions[current_code].name if current_code in self.definitions else "未配置节点",
+                "completed": sum(node["status"] == "completed" for node in nodes),
+                "total": len(nodes),
+                "current_stage": self.definitions[current_code].stage if current_code in self.definitions else "未配置阶段",
+                "previous_node": nodes[current_index - 1] if current_index > 0 and nodes else None,
+                "current_node": current_node,
+                "next_node": nodes[current_index + 1] if current_index + 1 < len(nodes) else None,
+                "nodes": nodes,
+                "stages": stages,
+                "rules": [rule.model_dump(mode="json") for rule in self.rules.values()],
+                "source": self.product_repository.last_source,
+            }
+        ]
+
     def dashboard_data(self) -> list[dict]:
         result = []
         for project in self.repository.projects.values():
