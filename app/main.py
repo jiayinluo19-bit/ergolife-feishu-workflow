@@ -58,6 +58,7 @@ def _render_product_workbench(data: dict, view: str, demo_role: str | None) -> s
     empty = '<div class="empty">当前身份在此视图下没有商品。可以切换上方角色进行演示。</div>' if not cards else ""
     identity = html.escape(actor.get("display_name") or "未识别用户")
     login = '<a class="login" href="/auth/feishu/login">使用飞书身份登录</a>' if not actor.get("role") else f'<span class="login">已识别：{identity}</span>'
+    login += ' <a class="login" href="/lifecycle">全链路详情</a>'
     if actor.get("is_admin"):
         login += ' <a class="login" href="/admin/directory">管理角色</a> <a class="login" href="/admin/directory/sync">同步全员</a>'
     summary = data.get("summary", {})
@@ -232,6 +233,12 @@ def dashboard(
     except ValueError as exc:
         return HTMLResponse(f"<h1>请求有误</h1><p>{html.escape(str(exc))}</p>", status_code=400)
     return HTMLResponse(_render_product_workbench(data, view, demo_role))
+
+
+@app.get("/lifecycle", response_class=HTMLResponse)
+def lifecycle_dashboard(project_id: str | None = None) -> HTMLResponse:
+    """Open the detailed full-lifecycle view from the product workbench."""
+    return HTMLResponse(_render_dashboard(runtime.dashboard_data(), project_id))
 
 
 def _require_directory_admin(request: Request) -> str:
