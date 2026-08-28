@@ -135,6 +135,10 @@ def _send_product_handoff_card(product: dict) -> None:
     next_owner = lifecycle.get("next_owner_user_id")
     if not next_owner or not lifecycle.get("next_code"):
         return
+    if runtime.product_access.demo_mode and str(next_owner).startswith("mock_"):
+        next_owner = os.getenv("FEISHU_TEST_RECEIVE_ID", "").strip()
+    if not next_owner:
+        return
     try:
         FeishuOpenAPI().send_interactive_card(
             next_owner,
