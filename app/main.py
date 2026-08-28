@@ -338,6 +338,8 @@ def current_identity(request: Request) -> dict:
         "roles": list(actor.roles),
         "department": actor.department,
         "display_name": actor.display_name,
+        "is_admin": bool(runtime.directory.is_admin(open_id)) if open_id else False,
+        "directory_storage": runtime.directory.source,
         "authenticated": bool(open_id),
     }
 

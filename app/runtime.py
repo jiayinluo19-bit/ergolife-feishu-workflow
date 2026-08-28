@@ -32,7 +32,11 @@ class WorkflowRuntime:
         self.role_assignments = load_role_assignments(ROOT / "config" / "role_mapping.mock.yaml")
         directory_dsn = database_url if repository_mode != "memory" else ""
         demo_mode = os.getenv("DEMO_MODE", "true").lower() in {"1", "true", "yes", "on"}
-        admin_open_ids = [item.strip() for item in os.getenv("FEISHU_ADMIN_OPEN_IDS", "").split(",") if item.strip()]
+        admin_open_ids = [
+            item.strip().strip('"\'')
+            for item in os.getenv("FEISHU_ADMIN_OPEN_IDS", "").split(",")
+            if item.strip().strip('"\'')
+        ]
         if demo_mode and not admin_open_ids and os.getenv("FEISHU_TEST_RECEIVE_ID", "").strip():
             # Demo-only convenience: the existing test recipient can open the
             # admin console without another Railway variable.  Production
