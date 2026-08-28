@@ -1,9 +1,12 @@
 import os
+import json
 from pathlib import Path
 
-from .config_loader import load_actions, load_assignments, load_definitions, load_rules
+from .config_loader import load_actions, load_assignments, load_definitions, load_role_assignments, load_rules
 from .domain.models import ProductProject
 from .repositories.memory_repository import MemoryRepository
+from .repositories.product_repository import ProductRepository
+from .services.product_access_service import ProductAccessService
 from .services.workflow_service import WorkflowService
 
 
@@ -25,11 +28,38 @@ class WorkflowRuntime:
         self.actions = load_actions(ROOT / "config" / "actions_v1.yaml")
         self.rules = load_rules(ROOT / "config" / "rules_v1.yaml")
         self.assignments = load_assignments(ROOT / "config" / "role_mapping.mock.yaml")
+        self.role_assignments = load_role_assignments(ROOT / "config" / "role_mapping.mock.yaml")
         configured_user = os.getenv("FEISHU_TEST_RECEIVE_ID", "").strip()
         if os.getenv("FEISHU_RECEIVE_ID_TYPE", "open_id") == "open_id" and configured_user:
             self.assignments["product_manager"] = configured_user
+            if "product_manager" in self.role_assignments:
+                self.role_assignments["product_manager"] = self.role_assignments["product_manager"].model_copy(
+                    update={"user_id": configured_user}
+                )
+        # Production can map real Feishu open_ids without editing the workflow
+        # definition files.  Example: {"product_manager":"ou_xxx", "quality_reviewer":"ou_yyy"}.
+        raw_role_map = os.getenv("FEISHU_ROLE_USER_MAP_JSON", "").strip()
+        if raw_role_map:
+            try:
+                role_map = json.loads(raw_role_map)
+            except json.JSONDecodeError:
+                role_map = {}
+            for role, user_id in role_map.items() if isinstance(role_map, dict) else []:
+                if role in self.role_assignments and str(user_id).strip():
+                    normalized_user_id = str(user_id).strip()
+                    self.assignments[role] = normalized_user_id
+                    self.role_assignments[role] = self.role_assignments[role].model_copy(
+                        update={"user_id": normalized_user_id}
+                    )
         self.service = WorkflowService(self.repository, self.definitions, self.assignments)
         self.simulation_mode = os.getenv("WORKFLOW_SIMULATION_MODE", "true").lower() in {"1", "true", "yes", "on"}
+        self.product_repository = ProductRepository()
+        self.product_access = ProductAccessService(
+            self.product_repository,
+            self.definitions,
+            self.role_assignments,
+            demo_mode=os.getenv("DEMO_MODE", "true").lower() in {"1", "true", "yes", "on"},
+        )
         self._ensure_mock_project()
 
     def _ensure_mock_project(self) -> None:
@@ -290,6 +320,24 @@ class WorkflowRuntime:
                 }
             )
         return result
+
+    def product_dashboard_data(
+        self,
+        *,
+        view: str = "mine",
+        open_id: str | None = None,
+        demo_role: str | None = None,
+    ) -> dict:
+        return self.product_access.list_products(view=view, open_id=open_id, demo_role=demo_role)
+
+    def advance_product(
+        self,
+        product_id: str,
+        *,
+        open_id: str | None = None,
+        demo_role: str | None = None,
+    ) -> dict:
+        return self.product_access.advance_product(product_id, open_id=open_id, demo_role=demo_role)
 
     @staticmethod
     def _source_status(status: str) -> str:

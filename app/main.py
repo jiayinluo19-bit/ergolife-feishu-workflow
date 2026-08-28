@@ -1,16 +1,65 @@
 import html
+import json
+import os
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from .integrations.feishu.events import extract_card_action, is_url_verification, url_verification_response
-from .integrations.feishu.cards import project_lifecycle_card, task_assignment_card
+from .integrations.feishu.cards import product_handoff_card, project_lifecycle_card, task_assignment_card
 from .integrations.feishu.client import FeishuNotConfiguredError, FeishuOpenAPI
+from .integrations.feishu.identity import FeishuIdentity, FeishuIdentityError
 from .runtime import runtime
 from .services.workflow_service import WorkflowError
 
 app = FastAPI(title="ERGOLIFE 商品全生命周期协同 MVP", version="0.1.0")
+feishu_identity = FeishuIdentity()
+
+
+def _current_open_id(request: Request, explicit: str | None = None) -> str | None:
+    session_open_id = feishu_identity.read_session(request.cookies.get("ergolife_session"))
+    # Query/body impersonation is opt-in for local demos only.  Normal web
+    # requests must use the signed Feishu session cookie.
+    if explicit and runtime.product_access.demo_mode and os.getenv("ALLOW_QUERY_ACTOR", "false").lower() in {"1", "true", "yes", "on"}:
+        return explicit
+    return session_open_id
+
+
+def _render_product_workbench(data: dict, view: str, demo_role: str | None) -> str:
+    actor = data["actor"]
+    view_labels = {"mine": "我的商品", "participating": "我参与的商品", "all": "全部商品"}
+    source_labels = {"postgres": "已连接商品 PostgreSQL", "mock": "演示数据", "mock-fallback": "数据库暂不可用 · 演示数据"}
+    role_links = "".join(
+        f'<a class="role-pill {"active" if item["role"] == actor.get("role") else ""}" href="/dashboard?view={html.escape(view)}&demo_role={html.escape(item["role"])}">{html.escape(item["department"])} · {html.escape(item["display_name"])}</a>'
+        for item in data["roles"]
+    )
+    tabs = "".join(
+        f'<a class="tab {"active" if key == view else ""}" href="/dashboard?view={key}{f"&demo_role={html.escape(demo_role)}" if demo_role else ""}">{label}</a>'
+        for key, label in view_labels.items()
+    )
+    cards = []
+    for item in data["products"]:
+        lifecycle = item["lifecycle"]
+        access = item["access"]
+        action = ""
+        if access["can_advance"] and lifecycle["next_code"]:
+            action = f'<button class="advance" data-id="{html.escape(item["id"])}" data-next="{html.escape(lifecycle["next_code"])}">{html.escape(access["action_label"])}</button>'
+        elif lifecycle["next_code"]:
+            action = '<span class="readonly">当前角色只读</span>'
+        else:
+            action = '<span class="readonly">生命周期已结束</span>'
+        cards.append(
+            f'<article class="product-card"><div class="card-top"><div><h3>{html.escape(item["product_name"])}</h3><p>{html.escape(item["sku"])} · {html.escape(item["country_code"])} · {html.escape(item["amazon_sku"] or "无 MSKU")}</p></div><span class="node-badge">{html.escape(lifecycle["node_code"])}</span></div>'
+            f'<div class="stage">{html.escape(lifecycle["stage"])}<strong>{html.escape(lifecycle["node_name"])}</strong></div>'
+            f'<div class="handoff"><span>负责人：{html.escape(lifecycle["owner_name"] or lifecycle["owner_role"] or "未配置")}</span><span>部门：{html.escape(lifecycle["owner_department"] or "—")}</span></div>'
+            f'<div class="flow"><span class="done">{html.escape(lifecycle["previous_code"] or "起点")}</span><i>→</i><b>{html.escape(lifecycle["node_code"])}</b><i>→</i><span>{html.escape(lifecycle["next_code"] or "终点")}</span></div>{action}</article>'
+        )
+    empty = '<div class="empty">当前身份在此视图下没有商品。可以切换上方角色进行演示。</div>' if not cards else ""
+    identity = html.escape(actor.get("display_name") or "未识别用户")
+    login = '<a class="login" href="/auth/feishu/login">使用飞书身份登录</a>' if not actor.get("role") else f'<span class="login">已识别：{identity}</span>'
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ERGOLIFE 商品工作台</title>
+<style>:root{{--blue:#3370ff;--ink:#182230;--muted:#667085;--line:#e8edf5;--green:#16a36a;--bg:#f4f7fb}}*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}.wrap{{max-width:1240px;margin:auto;padding:28px 18px 56px}}h1{{margin:0;font-size:28px}}.sub{{color:var(--muted);margin:5px 0 18px}}.toolbar{{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 18px}}.tab,.role-pill,.login{{padding:8px 12px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);text-decoration:none}}.tab.active,.role-pill.active{{background:#edf3ff;border-color:#9dbaff;color:var(--blue);font-weight:700}}.login{{margin-left:auto;color:var(--blue)}}.demo-note{{color:var(--muted);font-size:12px;margin:8px 0}}.summary{{display:flex;justify-content:space-between;gap:12px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 18px;margin-bottom:15px}}.summary strong{{font-size:21px;color:var(--blue)}}.summary small{{color:var(--muted);display:block}}.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}}.product-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:17px;box-shadow:0 3px 12px #1b3a5d08;transition:.2s}}.product-card:hover{{transform:translateY(-2px);box-shadow:0 8px 22px #1b3a5d12}}h3{{margin:0;font-size:16px}}p{{margin:4px 0;color:var(--muted);font-size:12px}}.card-top{{display:flex;justify-content:space-between;gap:10px}}.node-badge{{background:#e6efff;color:var(--blue);border-radius:999px;padding:4px 9px;font-weight:700;height:max-content}}.stage{{margin:18px 0 10px;color:var(--muted);font-size:12px}}.stage strong{{display:block;color:var(--ink);font-size:18px;margin-top:2px}}.handoff{{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;border-top:1px solid #f0f2f6;padding-top:10px}}.flow{{display:flex;align-items:center;gap:8px;margin:15px 0;color:#98a2b3;font-size:12px}}.flow b{{color:var(--blue);font-size:14px}}.flow .done{{color:var(--green)}}.flow i{{font-style:normal;color:#c1cad8}}button.advance{{width:100%;border:0;border-radius:9px;padding:10px;background:var(--blue);color:#fff;cursor:pointer;font-weight:700}}.readonly{{display:block;padding:9px;text-align:center;background:#f7f8fa;border-radius:9px;color:var(--muted);font-size:12px}}.empty{{background:#fff;border:1px dashed #cbd5e1;border-radius:14px;padding:35px;text-align:center;color:var(--muted);grid-column:1/-1}}@media(max-width:700px){{.wrap{{padding:20px 12px}}h1{{font-size:23px}}.login{{margin-left:0}}.summary{{align-items:flex-start;flex-direction:column}}}}</style></head><body><main class="wrap"><h1>ERGOLIFE 商品协同工作台</h1><div class="sub">按你的部门角色查看负责商品、参与商品，并在当前节点完成交接</div><div class="toolbar">{tabs}{login}</div>{f'<div class="demo-note">演示角色切换（仅 DEMO_MODE 开启时显示）：</div><div class="toolbar">{role_links}</div>' if runtime.product_access.demo_mode else ''}<div class="summary"><div><strong>{len(data["products"])}</strong> 件商品<small>{view_labels.get(view, view)} · {source_labels.get(data["source"], data["source"])}</small></div><div>当前角色：{html.escape(actor.get("department") or "未映射")} · {identity}</div></div><section class="grid">{''.join(cards)}{empty}</section></main><script>document.querySelectorAll('.advance').forEach(function(button){{button.addEventListener('click',async function(){{button.disabled=true;button.textContent='正在交接…';const response=await fetch('/api/products/'+encodeURIComponent(button.dataset.id)+'/advance',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{demo_role:{json.dumps(demo_role)},next_node:button.dataset.next}})}});const body=await response.json();if(!response.ok){{alert(body.detail||'操作失败');button.disabled=false;button.textContent='重试';return}}location.reload()}})}});</script></body></html>"""
 
 
 def _render_dashboard(projects: list[dict], selected_project_id: str | None) -> str:
@@ -79,6 +128,26 @@ def _send_next_card(project_id: str, receive_id: str) -> None:
 def _send_lifecycle_card(project_id: str, receive_id: str) -> None:
     if not receive_id:
         return
+
+
+def _send_product_handoff_card(product: dict) -> None:
+    lifecycle = product.get("lifecycle", {})
+    next_owner = lifecycle.get("next_owner_user_id")
+    if not next_owner or not lifecycle.get("next_code"):
+        return
+    try:
+        FeishuOpenAPI().send_interactive_card(
+            next_owner,
+            product_handoff_card(
+                product_name=product.get("product_name", "未命名商品"),
+                sku=product.get("sku", ""),
+                current_node=lifecycle.get("node_code", ""),
+                next_node=f"{lifecycle['next_code']} {lifecycle.get('next_name', '')}".strip(),
+                next_owner=lifecycle.get("next_owner_name") or lifecycle.get("next_owner_role") or "下一节点负责人",
+            ),
+        )
+    except (FeishuNotConfiguredError, RuntimeError):
+        return
     try:
         project = runtime.repository.get_project(project_id)
         lines = runtime.lifecycle_lines(project_id)
@@ -98,7 +167,14 @@ def _send_lifecycle_card(project_id: str, receive_id: str) -> None:
 @app.get("/health")
 def health() -> dict[str, str]:
     storage = "postgres" if runtime.repository.__class__.__name__ == "PostgresRepository" else "memory"
-    return {"status": "ok", "service": "ergolife-feishu-workflow", "storage": storage}
+    product_storage = "postgres" if runtime.product_repository.dsn else "mock"
+    return {
+        "status": "ok",
+        "service": "ergolife-feishu-workflow",
+        "storage": storage,
+        "product_storage": product_storage,
+        "demo_mode": str(runtime.product_access.demo_mode).lower(),
+    }
 
 
 @app.get("/")
@@ -107,13 +183,104 @@ def root() -> dict[str, str]:
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-def dashboard(project_id: str | None = None) -> HTMLResponse:
-    return HTMLResponse(_render_dashboard(runtime.dashboard_data(), project_id))
+def dashboard(
+    request: Request,
+    project_id: str | None = None,
+    view: str = "mine",
+    demo_role: str | None = None,
+    actor_open_id: str | None = None,
+) -> HTMLResponse:
+    if project_id:
+        return HTMLResponse(_render_dashboard(runtime.dashboard_data(), project_id))
+    open_id = _current_open_id(request, actor_open_id)
+    try:
+        data = runtime.product_dashboard_data(view=view, open_id=open_id, demo_role=demo_role)
+    except ValueError as exc:
+        return HTMLResponse(f"<h1>请求有误</h1><p>{html.escape(str(exc))}</p>", status_code=400)
+    return HTMLResponse(_render_product_workbench(data, view, demo_role))
 
 
 @app.get("/api/dashboard/projects")
 def dashboard_projects() -> list[dict]:
     return runtime.dashboard_data()
+
+
+@app.get("/api/dashboard/products")
+def dashboard_products(
+    request: Request,
+    view: str = "mine",
+    demo_role: str | None = None,
+    actor_open_id: str | None = None,
+) -> dict:
+    return runtime.product_dashboard_data(
+        view=view,
+        open_id=_current_open_id(request, actor_open_id),
+        demo_role=demo_role,
+    )
+
+
+@app.post("/api/products/{product_id}/advance")
+async def advance_product(product_id: str, request: Request, background_tasks: BackgroundTasks) -> dict:
+    body = await request.json()
+    try:
+        result = runtime.advance_product(
+            product_id,
+            open_id=_current_open_id(request, body.get("actor_open_id")),
+            demo_role=body.get("demo_role"),
+        )
+        background_tasks.add_task(_send_product_handoff_card, result)
+        return result
+    except (KeyError, ValueError, PermissionError, RuntimeError) as exc:
+        status = 403 if isinstance(exc, PermissionError) else 409 if isinstance(exc, RuntimeError) else 400
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+
+@app.get("/api/me")
+def current_identity(request: Request) -> dict:
+    open_id = _current_open_id(request)
+    actor = runtime.product_access.resolve_actor(open_id)
+    return {
+        "open_id": actor.open_id if open_id else None,
+        "role": actor.role,
+        "department": actor.department,
+        "display_name": actor.display_name,
+        "authenticated": bool(open_id),
+    }
+
+
+@app.get("/auth/feishu/login")
+def feishu_login() -> RedirectResponse:
+    try:
+        return RedirectResponse(feishu_identity.authorization_url(), status_code=307)
+    except FeishuIdentityError as exc:
+        return HTMLResponse(f"<h1>飞书登录暂不可用</h1><p>{html.escape(str(exc))}</p>", status_code=503)
+
+
+@app.get("/auth/feishu/callback")
+def feishu_callback(code: str, state: str) -> Response:
+    try:
+        user = feishu_identity.exchange_code(code, state)
+    except FeishuIdentityError as exc:
+        return HTMLResponse(f"<h1>飞书登录失败</h1><p>{html.escape(str(exc))}</p>", status_code=400)
+    response = RedirectResponse("/dashboard", status_code=303)
+    response.set_cookie(
+        "ergolife_session",
+        feishu_identity.sign_session(str(user["open_id"])),
+        httponly=True,
+        secure=feishu_identity.public_base_url.startswith("https://"),
+        samesite="lax",
+        max_age=86400,
+    )
+    return response
+
+
+@app.get("/auth/feishu/logout")
+def feishu_logout() -> RedirectResponse:
+    response = RedirectResponse("/dashboard", status_code=303)
+    response.delete_cookie("ergolife_session")
+    return response
 
 
 @app.post("/api/feishu/events")

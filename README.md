@@ -56,3 +56,25 @@ python scripts/send_test_card.py
 飞书 SDK、通讯录、多维表格、机器人消息和事件回调放在 `app/integrations/feishu/`，不进入当前流程核心。
 
 本地接入需要在运行环境设置 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`。不要把 App Secret 提交到 Git。回调地址为 `/api/feishu/events` 和 `/api/feishu/card-actions`；正式接入前还需要补齐事件验签/加解密、幂等处理和 Feishu Repository。
+
+## 商品协同工作台（当前 MVP）
+
+工作台单独读取商品主数据数据库的 `product_market_parameters` 表，使用其中的
+`lifecycle_node_code` 显示当前节点。它不会依赖工作流数据库中的演示项目。
+
+```text
+PRODUCT_DATABASE_URL=${{ecommerce-postgres.DATABASE_URL}}
+DEMO_MODE=true
+FEISHU_ROLE_USER_MAP_JSON={"product_manager":"ou_xxx","quality_reviewer":"ou_yyy"}
+```
+
+网页应用打开 `/dashboard` 后可以切换“我的商品 / 我参与的商品 / 全部商品”。
+在 `DEMO_MODE=true` 时页面还会显示部门角色切换器，方便用一个飞书账号演示
+产品、采购、品质、物流、仓储、运营等角色；正式上线前应关闭该开关并使用飞书
+OAuth 登录。登录入口为 `/auth/feishu/login`，回调地址为
+`/auth/feishu/callback`，两者都要加入飞书应用的安全设置。
+
+当前节点允许操作时，点击“完成并交接”会以乐观并发方式把商品的
+`lifecycle_node_code` 更新为节点定义中的 `next_nodes[0]`，因此下一部门马上能在
+“我的商品”看到它。后续接入完整交付物、附件和节点历史时，可以在此适配器上继续
+扩展，而不必改页面和权限模型。

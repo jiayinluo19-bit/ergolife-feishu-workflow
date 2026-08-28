@@ -11,9 +11,19 @@ def load_definitions(path: Path) -> dict[str, NodeDefinition]:
 
 
 def load_assignments(path: Path) -> dict[str, str]:
+    return {role: item.user_id for role, item in load_role_assignments(path).items()}
+
+
+def load_role_assignments(path: Path) -> dict[str, RoleAssignment]:
+    """Load the complete role map, including department and display name.
+
+    The workflow engine only needs ``role -> user_id``.  The product workbench
+    also needs the human-facing department metadata, so keep both views
+    available without changing the existing repository contract.
+    """
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     assignments = [RoleAssignment.model_validate(item) for item in raw["roles"]]
-    return {item.role: item.user_id for item in assignments}
+    return {item.role: item for item in assignments}
 
 
 def load_actions(path: Path) -> dict[str, ActionDefinition]:
