@@ -2,14 +2,22 @@ import os
 from urllib.parse import quote
 
 
+def _workbench_link(path: str = "/dashboard") -> str:
+    """Open the configured web-app homepage inside Feishu when possible."""
+    app_id = os.getenv("FEISHU_APP_ID", "").strip()
+    if app_id:
+        encoded_path = quote(path, safe="")
+        return f"https://applink.feishu.cn/client/web_app/open?appId={quote(app_id)}&path={encoded_path}&mode=appCenter"
+    base = os.getenv("PUBLIC_BASE_URL", "https://ergolife-feishu-workflow-production.up.railway.app").rstrip("/")
+    return f"{base}{path}"
+
+
 def task_assignment_card(
     *, project_id: str, node_instance_id: str, product_name: str, node_name: str, owner_name: str,
     node_status: str = "ready", source_status: str = "未开始", trigger_type: str = "", trigger_condition: str = ""
 ) -> dict:
-    dashboard_url = os.getenv("PUBLIC_BASE_URL", "https://ergolife-feishu-workflow-production.up.railway.app")
-    dashboard_url = dashboard_url.rstrip("/")
-    workbench_url = f"{dashboard_url}/dashboard?view=mine"
-    lifecycle_url = f"{dashboard_url}/dashboard?project_id={quote(project_id)}"
+    workbench_url = _workbench_link("/dashboard?view=mine")
+    lifecycle_url = _workbench_link(f"/dashboard?project_id={quote(project_id)}")
     waiting_trigger = node_status == "pending"
     trigger_labels = {"event": "事件触发", "result": "结果触发", "threshold": "阈值触发"}
     actions = []
@@ -54,13 +62,13 @@ def product_handoff_card(
     next_node: str,
     next_owner: str,
 ) -> dict:
-    dashboard_url = os.getenv("PUBLIC_BASE_URL", "https://ergolife-feishu-workflow-production.up.railway.app").rstrip("/")
+    dashboard_url = _workbench_link("/dashboard?view=mine")
     return {
         "config": {"wide_screen_mode": True, "enable_forward": True},
         "header": {"template": "blue", "title": {"tag": "plain_text", "content": "ERGOLIFE 商品任务交接"}},
         "elements": [
             {"tag": "div", "text": {"tag": "lark_md", "content": f"**商品：**{product_name}\n**SKU：**{sku}\n**已完成：**{current_node}\n**请接收：**{next_node}\n**负责人：**{next_owner}"}},
             {"tag": "hr"},
-            {"tag": "action", "actions": [{"tag": "button", "text": {"tag": "plain_text", "content": "打开我的商品工作台"}, "type": "primary", "url": f"{dashboard_url}/dashboard?view=mine"}]},
+            {"tag": "action", "actions": [{"tag": "button", "text": {"tag": "plain_text", "content": "打开我的商品工作台"}, "type": "primary", "url": dashboard_url}]},
         ],
     }

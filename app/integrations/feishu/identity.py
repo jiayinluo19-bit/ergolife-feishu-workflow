@@ -51,6 +51,15 @@ class FeishuIdentity:
             raise FeishuIdentityError("登录状态已失效，请重新登录")
         if not self.app_id or not self.app_secret:
             raise FeishuIdentityError("未配置飞书应用凭证")
+        return self._exchange_user_code(code)
+
+    def exchange_h5_code(self, code: str) -> dict:
+        """Exchange ``tt.requestAuthCode`` output from the Feishu client."""
+        if not code:
+            raise FeishuIdentityError("飞书端内免登缺少 code")
+        return self._exchange_user_code(code)
+
+    def _exchange_user_code(self, code: str) -> dict:
         app_token = self._post_json(
             "https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal",
             {"app_id": self.app_id, "app_secret": self.app_secret},

@@ -30,19 +30,19 @@ def _render_product_workbench(data: dict, view: str, demo_role: str | None) -> s
     actor = data["actor"]
     view_labels = {"mine": "我的商品", "participating": "我参与的商品", "all": "全部商品"}
     source_labels = {"postgres": "已连接商品 PostgreSQL", "mock": "演示数据", "mock-fallback": "数据库暂不可用 · 演示数据"}
+    demo_suffix = f"&demo_role={html.escape(demo_role)}" if demo_role else ""
+    tabs = "".join(
+        f'<a class="tab {"active" if key == view else ""}" href="/dashboard?view={key}{demo_suffix}">{label}</a>'
+        for key, label in view_labels.items()
+    )
     role_links = "".join(
         f'<a class="role-pill {"active" if item["role"] == actor.get("role") else ""}" href="/dashboard?view={html.escape(view)}&demo_role={html.escape(item["role"])}">{html.escape(item["department"])} · {html.escape(item["display_name"])}</a>'
         for item in data["roles"]
-    )
-    tabs = "".join(
-        f'<a class="tab {"active" if key == view else ""}" href="/dashboard?view={key}{f"&demo_role={html.escape(demo_role)}" if demo_role else ""}">{label}</a>'
-        for key, label in view_labels.items()
     )
     cards = []
     for item in data["products"]:
         lifecycle = item["lifecycle"]
         access = item["access"]
-        action = ""
         if access["can_advance"] and lifecycle["next_code"]:
             action = f'<button class="advance" data-id="{html.escape(item["id"])}" data-next="{html.escape(lifecycle["next_code"])}">{html.escape(access["action_label"])}</button>'
         elif lifecycle["next_code"]:
@@ -50,7 +50,7 @@ def _render_product_workbench(data: dict, view: str, demo_role: str | None) -> s
         else:
             action = '<span class="readonly">生命周期已结束</span>'
         cards.append(
-            f'<article class="product-card"><div class="card-top"><div><h3>{html.escape(item["product_name"])}</h3><p>{html.escape(item["sku"])} · {html.escape(item["country_code"])} · {html.escape(item["amazon_sku"] or "无 MSKU")}</p></div><span class="node-badge">{html.escape(lifecycle["node_code"])}</span></div>'
+            f'<article class="product-card"><div class="card-top"><div><h3>{html.escape(item["product_name"])}</h3><p>{html.escape(item["sku"])} · {html.escape(item["country_code"])} · {html.escape(item["amazon_sku"] or "无 MSKU")}</p></div><div><span class="node-badge">{html.escape(lifecycle["node_code"])}</span><span class="deadline {html.escape(lifecycle.get("deadline_status", "normal"))}">{html.escape(lifecycle.get("deadline_label", "未设置截止时间"))}</span></div></div>'
             f'<div class="stage">{html.escape(lifecycle["stage"])}<strong>{html.escape(lifecycle["node_name"])}</strong></div>'
             f'<div class="handoff"><span>负责人：{html.escape(lifecycle["owner_name"] or lifecycle["owner_role"] or "未配置")}</span><span>部门：{html.escape(lifecycle["owner_department"] or "—")}</span></div>'
             f'<div class="flow"><span class="done">{html.escape(lifecycle["previous_code"] or "起点")}</span><i>→</i><b>{html.escape(lifecycle["node_code"])}</b><i>→</i><span>{html.escape(lifecycle["next_code"] or "终点")}</span></div>{action}</article>'
@@ -58,8 +58,17 @@ def _render_product_workbench(data: dict, view: str, demo_role: str | None) -> s
     empty = '<div class="empty">当前身份在此视图下没有商品。可以切换上方角色进行演示。</div>' if not cards else ""
     identity = html.escape(actor.get("display_name") or "未识别用户")
     login = '<a class="login" href="/auth/feishu/login">使用飞书身份登录</a>' if not actor.get("role") else f'<span class="login">已识别：{identity}</span>'
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ERGOLIFE 商品工作台</title>
-<style>:root{{--blue:#3370ff;--ink:#182230;--muted:#667085;--line:#e8edf5;--green:#16a36a;--bg:#f4f7fb}}*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}.wrap{{max-width:1240px;margin:auto;padding:28px 18px 56px}}h1{{margin:0;font-size:28px}}.sub{{color:var(--muted);margin:5px 0 18px}}.toolbar{{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 18px}}.tab,.role-pill,.login{{padding:8px 12px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);text-decoration:none}}.tab.active,.role-pill.active{{background:#edf3ff;border-color:#9dbaff;color:var(--blue);font-weight:700}}.login{{margin-left:auto;color:var(--blue)}}.demo-note{{color:var(--muted);font-size:12px;margin:8px 0}}.summary{{display:flex;justify-content:space-between;gap:12px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 18px;margin-bottom:15px}}.summary strong{{font-size:21px;color:var(--blue)}}.summary small{{color:var(--muted);display:block}}.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}}.product-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:17px;box-shadow:0 3px 12px #1b3a5d08;transition:.2s}}.product-card:hover{{transform:translateY(-2px);box-shadow:0 8px 22px #1b3a5d12}}h3{{margin:0;font-size:16px}}p{{margin:4px 0;color:var(--muted);font-size:12px}}.card-top{{display:flex;justify-content:space-between;gap:10px}}.node-badge{{background:#e6efff;color:var(--blue);border-radius:999px;padding:4px 9px;font-weight:700;height:max-content}}.stage{{margin:18px 0 10px;color:var(--muted);font-size:12px}}.stage strong{{display:block;color:var(--ink);font-size:18px;margin-top:2px}}.handoff{{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;border-top:1px solid #f0f2f6;padding-top:10px}}.flow{{display:flex;align-items:center;gap:8px;margin:15px 0;color:#98a2b3;font-size:12px}}.flow b{{color:var(--blue);font-size:14px}}.flow .done{{color:var(--green)}}.flow i{{font-style:normal;color:#c1cad8}}button.advance{{width:100%;border:0;border-radius:9px;padding:10px;background:var(--blue);color:#fff;cursor:pointer;font-weight:700}}.readonly{{display:block;padding:9px;text-align:center;background:#f7f8fa;border-radius:9px;color:var(--muted);font-size:12px}}.empty{{background:#fff;border:1px dashed #cbd5e1;border-radius:14px;padding:35px;text-align:center;color:var(--muted);grid-column:1/-1}}@media(max-width:700px){{.wrap{{padding:20px 12px}}h1{{font-size:23px}}.login{{margin-left:0}}.summary{{align-items:flex-start;flex-direction:column}}}}</style></head><body><main class="wrap"><h1>ERGOLIFE 商品协同工作台</h1><div class="sub">按你的部门角色查看负责商品、参与商品，并在当前节点完成交接</div><div class="toolbar">{tabs}{login}</div>{f'<div class="demo-note">演示角色切换（仅 DEMO_MODE 开启时显示）：</div><div class="toolbar">{role_links}</div>' if runtime.product_access.demo_mode else ''}<div class="summary"><div><strong>{len(data["products"])}</strong> 件商品<small>{view_labels.get(view, view)} · {source_labels.get(data["source"], data["source"])}</small></div><div>当前角色：{html.escape(actor.get("department") or "未映射")} · {identity}</div></div><section class="grid">{''.join(cards)}{empty}</section></main><script>document.querySelectorAll('.advance').forEach(function(button){{button.addEventListener('click',async function(){{button.disabled=true;button.textContent='正在交接…';const response=await fetch('/api/products/'+encodeURIComponent(button.dataset.id)+'/advance',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{demo_role:{json.dumps(demo_role)},next_node:button.dataset.next}})}});const body=await response.json();if(!response.ok){{alert(body.detail||'操作失败');button.disabled=false;button.textContent='重试';return}}location.reload()}})}});</script></body></html>"""
+    summary = data.get("summary", {})
+    h5_auth_script = ""
+    if os.getenv("FEISHU_APP_ID", "").strip():
+        h5_auth_script = (
+            '<script src="https://lf-scm-cn.feishucdn.com/lark/op/h5-js-sdk-1.5.44.js"></script>'
+            '<script>(function(){if(!window.tt||!window.tt.requestAuthCode)return;function request(){window.tt.requestAuthCode({appId:'
+            + json.dumps(os.getenv("FEISHU_APP_ID", ""))
+            + ',success:function(info){if(!info||!info.code)return;fetch("/api/auth/feishu/h5",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({code:info.code})}).then(function(){location.reload()})}})}if(window.h5sdk&&window.h5sdk.ready)window.h5sdk.ready(request);else request()})();</script>'
+        )
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ERGOLIFE 商品工作台</title><style>
+:root{{--blue:#3370ff;--ink:#182230;--muted:#667085;--line:#e8edf5;--green:#16a36a;--bg:#f4f7fb}}*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}.wrap{{max-width:1240px;margin:auto;padding:28px 18px 56px}}h1{{margin:0;font-size:28px}}.sub{{color:var(--muted);margin:5px 0 18px}}.toolbar{{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 18px}}.tab,.role-pill,.login{{padding:8px 12px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);text-decoration:none}}.tab.active,.role-pill.active{{background:#edf3ff;border-color:#9dbaff;color:var(--blue);font-weight:700}}.login{{margin-left:auto;color:var(--blue)}}.demo-note{{color:var(--muted);font-size:12px;margin:8px 0}}.summary{{display:flex;gap:18px;align-items:center;flex-wrap:wrap;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 18px;margin-bottom:15px}}.summary-item{{min-width:100px}}.summary-item strong{{font-size:21px;color:var(--blue);display:block}}.summary-item small{{color:var(--muted);display:block}}.summary-user{{margin-left:auto;color:var(--muted)}}.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}}.product-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:17px;box-shadow:0 3px 12px #1b3a5d08;transition:.2s}}.product-card:hover{{transform:translateY(-2px);box-shadow:0 8px 22px #1b3a5d12}}h3{{margin:0;font-size:16px}}p{{margin:4px 0;color:var(--muted);font-size:12px}}.card-top{{display:flex;justify-content:space-between;gap:10px}}.node-badge{{display:inline-block;background:#e6efff;color:var(--blue);border-radius:999px;padding:4px 9px;font-weight:700}}.deadline{{display:block;text-align:right;font-size:11px;margin-top:5px}}.deadline.overdue{{color:#e5484d}}.deadline.due_soon{{color:#d28b00}}.deadline.normal{{color:var(--muted)}}.stage{{margin:18px 0 10px;color:var(--muted);font-size:12px}}.stage strong{{display:block;color:var(--ink);font-size:18px;margin-top:2px}}.handoff{{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;border-top:1px solid #f0f2f6;padding-top:10px}}.flow{{display:flex;align-items:center;gap:8px;margin:15px 0;color:#98a2b3;font-size:12px}}.flow b{{color:var(--blue);font-size:14px}}.flow .done{{color:var(--green)}}.flow i{{font-style:normal;color:#c1cad8}}button.advance{{width:100%;border:0;border-radius:9px;padding:10px;background:var(--blue);color:#fff;cursor:pointer;font-weight:700}}.readonly{{display:block;padding:9px;text-align:center;background:#f7f8fa;border-radius:9px;color:var(--muted);font-size:12px}}.empty{{background:#fff;border:1px dashed #cbd5e1;border-radius:14px;padding:35px;text-align:center;color:var(--muted);grid-column:1/-1}}@media(max-width:700px){{.wrap{{padding:20px 12px}}h1{{font-size:23px}}.login{{margin-left:0}}.summary-user{{margin-left:0}}}}</style></head><body><main class="wrap"><h1>ERGOLIFE 商品协同工作台</h1><div class="sub">按你的部门角色查看负责商品、参与商品，并在当前节点完成交接</div><div class="toolbar">{tabs}{login}</div>{f'<div class="demo-note">演示角色切换（仅 DEMO_MODE 开启时显示）：</div><div class="toolbar">{role_links}</div>' if runtime.product_access.demo_mode else ''}<div class="summary"><div class="summary-item"><strong>{summary.get("total", len(data["products"]))}</strong><small>{view_labels.get(view, view)}</small></div><div class="summary-item"><strong>{summary.get("actionable", 0)}</strong><small>当前可处理</small></div><div class="summary-item"><strong>{summary.get("due_soon", 0)}</strong><small>24小时内到期</small></div><div class="summary-item"><strong>{summary.get("overdue", 0)}</strong><small>已逾期</small></div><div class="summary-user">{source_labels.get(data["source"], data["source"])} · {identity}</div></div><section class="grid">{''.join(cards)}{empty}</section></main><script>document.querySelectorAll('.advance').forEach(function(button){{button.addEventListener('click',async function(){{button.disabled=true;button.textContent='正在交接…';const response=await fetch('/api/products/'+encodeURIComponent(button.dataset.id)+'/advance',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{demo_role:{json.dumps(demo_role)},next_node:button.dataset.next}})}});const body=await response.json();if(!response.ok){{alert(body.detail||'操作失败');button.disabled=false;button.textContent='重试';return}}location.reload()}})}});</script>{h5_auth_script}</body></html>"""
 
 
 def _render_dashboard(projects: list[dict], selected_project_id: str | None) -> str:
@@ -252,6 +261,32 @@ def current_identity(request: Request) -> dict:
         "display_name": actor.display_name,
         "authenticated": bool(open_id),
     }
+
+
+@app.post("/api/auth/feishu/h5")
+async def feishu_h5_auth(request: Request) -> dict:
+    body = await request.json()
+    try:
+        user = feishu_identity.exchange_h5_code(str(body.get("code") or ""))
+    except FeishuIdentityError as exc:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    response = {"authenticated": True, "open_id": str(user["open_id"])}
+    # Set-Cookie cannot be returned from a plain dict, so use the same response
+    # shape as the browser OAuth callback below.
+    from fastapi.responses import JSONResponse
+
+    result = JSONResponse(response)
+    result.set_cookie(
+        "ergolife_session",
+        feishu_identity.sign_session(str(user["open_id"])),
+        httponly=True,
+        secure=feishu_identity.public_base_url.startswith("https://"),
+        samesite="lax",
+        max_age=86400,
+    )
+    return result
 
 
 @app.get("/auth/feishu/login")

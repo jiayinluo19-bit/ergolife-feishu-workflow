@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..config_loader import load_role_assignments
@@ -79,6 +80,12 @@ class ProductAccessService:
             products = [item for item in products if item["access"]["is_participant"]]
         elif view != "all":
             raise ValueError("view 必须是 mine、participating 或 all")
+        summary = {
+            "total": len(products),
+            "actionable": sum(item["access"]["can_advance"] for item in products),
+            "overdue": sum(item["lifecycle"]["deadline_status"] == "overdue" for item in products),
+            "due_soon": sum(item["lifecycle"]["deadline_status"] == "due_soon" for item in products),
+        }
         return {
             "view": view,
             "actor": {
@@ -90,6 +97,7 @@ class ProductAccessService:
             },
             "source": self.repository.last_source,
             "roles": self.available_roles(),
+            "summary": summary,
             "products": products,
         }
 
@@ -129,6 +137,7 @@ class ProductAccessService:
         next_code = definition.next_nodes[0] if definition and definition.next_nodes else None
         next_definition = self.definitions.get(next_code) if next_code else None
         next_owner = self.roles.get(next_definition.owner_role) if next_definition else None
+        deadline = self._deadline(product, definition)
         return {
             **product.as_dict(),
             "lifecycle": {
@@ -147,6 +156,7 @@ class ProductAccessService:
                 "next_owner_role": next_definition.owner_role if next_definition else None,
                 "next_owner_user_id": next_owner.user_id if next_owner else None,
                 "next_owner_name": next_owner.display_name if next_owner else None,
+                **deadline,
             },
             "access": {
                 "is_owner": bool(actor.role and definition and actor.role == definition.owner_role),
@@ -155,4 +165,38 @@ class ProductAccessService:
                 "can_advance": bool(actor.role and actor.role in participant_roles and next_code),
                 "action_label": f"完成 {product.lifecycle_node_code} 并交接至 {next_code}" if next_code else "已完成",
             },
+        }
+
+    @staticmethod
+    def _deadline(product: ProductRecord, definition: NodeDefinition | None) -> dict[str, Any]:
+        """Derive an MVP deadline from the product row's last update.
+
+        ``product_market_parameters`` currently stores the current node but not
+        a node history.  ``updated_at`` is therefore used as the entered-at
+        approximation until the lifecycle event table is introduced.
+        """
+        sla_hours = int(definition.sla_hours if definition else 24)
+        try:
+            entered_at = datetime.fromisoformat(product.updated_at) if product.updated_at else datetime.now(timezone.utc)
+        except ValueError:
+            entered_at = datetime.now(timezone.utc)
+        if entered_at.tzinfo is None:
+            entered_at = entered_at.replace(tzinfo=timezone.utc)
+        due_at = entered_at + timedelta(hours=sla_hours)
+        remaining_hours = (due_at - datetime.now(timezone.utc)).total_seconds() / 3600
+        if remaining_hours < 0:
+            status = "overdue"
+            label = f"已逾期 {abs(int(remaining_hours))} 小时"
+        elif remaining_hours <= 24:
+            status = "due_soon"
+            label = f"剩余 {max(1, int(remaining_hours))} 小时"
+        else:
+            status = "normal"
+            label = f"剩余 {max(1, int(remaining_hours))} 小时"
+        return {
+            "entered_at": entered_at.isoformat(),
+            "due_at": due_at.isoformat(),
+            "deadline_status": status,
+            "deadline_label": label,
+            "sla_hours": sla_hours,
         }
