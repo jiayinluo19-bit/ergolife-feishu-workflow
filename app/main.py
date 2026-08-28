@@ -3,7 +3,7 @@ import json
 import os
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from .integrations.feishu.events import extract_card_action, is_url_verification, url_verification_response
@@ -58,6 +58,8 @@ def _render_product_workbench(data: dict, view: str, demo_role: str | None) -> s
     empty = '<div class="empty">当前身份在此视图下没有商品。可以切换上方角色进行演示。</div>' if not cards else ""
     identity = html.escape(actor.get("display_name") or "未识别用户")
     login = '<a class="login" href="/auth/feishu/login">使用飞书身份登录</a>' if not actor.get("role") else f'<span class="login">已识别：{identity}</span>'
+    if actor.get("is_admin"):
+        login += ' <a class="login" href="/admin/directory">管理角色</a>'
     summary = data.get("summary", {})
     h5_auth_script = ""
     if os.getenv("FEISHU_APP_ID", "").strip():
@@ -69,6 +71,27 @@ def _render_product_workbench(data: dict, view: str, demo_role: str | None) -> s
         )
     return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ERGOLIFE 商品工作台</title><style>
 :root{{--blue:#3370ff;--ink:#182230;--muted:#667085;--line:#e8edf5;--green:#16a36a;--bg:#f4f7fb}}*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}.wrap{{max-width:1240px;margin:auto;padding:28px 18px 56px}}h1{{margin:0;font-size:28px}}.sub{{color:var(--muted);margin:5px 0 18px}}.toolbar{{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 18px}}.tab,.role-pill,.login{{padding:8px 12px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);text-decoration:none}}.tab.active,.role-pill.active{{background:#edf3ff;border-color:#9dbaff;color:var(--blue);font-weight:700}}.login{{margin-left:auto;color:var(--blue)}}.demo-note{{color:var(--muted);font-size:12px;margin:8px 0}}.summary{{display:flex;gap:18px;align-items:center;flex-wrap:wrap;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 18px;margin-bottom:15px}}.summary-item{{min-width:100px}}.summary-item strong{{font-size:21px;color:var(--blue);display:block}}.summary-item small{{color:var(--muted);display:block}}.summary-user{{margin-left:auto;color:var(--muted)}}.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}}.product-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:17px;box-shadow:0 3px 12px #1b3a5d08;transition:.2s}}.product-card:hover{{transform:translateY(-2px);box-shadow:0 8px 22px #1b3a5d12}}h3{{margin:0;font-size:16px}}p{{margin:4px 0;color:var(--muted);font-size:12px}}.card-top{{display:flex;justify-content:space-between;gap:10px}}.node-badge{{display:inline-block;background:#e6efff;color:var(--blue);border-radius:999px;padding:4px 9px;font-weight:700}}.deadline{{display:block;text-align:right;font-size:11px;margin-top:5px}}.deadline.overdue{{color:#e5484d}}.deadline.due_soon{{color:#d28b00}}.deadline.normal{{color:var(--muted)}}.stage{{margin:18px 0 10px;color:var(--muted);font-size:12px}}.stage strong{{display:block;color:var(--ink);font-size:18px;margin-top:2px}}.handoff{{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;border-top:1px solid #f0f2f6;padding-top:10px}}.flow{{display:flex;align-items:center;gap:8px;margin:15px 0;color:#98a2b3;font-size:12px}}.flow b{{color:var(--blue);font-size:14px}}.flow .done{{color:var(--green)}}.flow i{{font-style:normal;color:#c1cad8}}button.advance{{width:100%;border:0;border-radius:9px;padding:10px;background:var(--blue);color:#fff;cursor:pointer;font-weight:700}}.readonly{{display:block;padding:9px;text-align:center;background:#f7f8fa;border-radius:9px;color:var(--muted);font-size:12px}}.empty{{background:#fff;border:1px dashed #cbd5e1;border-radius:14px;padding:35px;text-align:center;color:var(--muted);grid-column:1/-1}}@media(max-width:700px){{.wrap{{padding:20px 12px}}h1{{font-size:23px}}.login{{margin-left:0}}.summary-user{{margin-left:0}}}}</style></head><body><main class="wrap"><h1>ERGOLIFE 商品协同工作台</h1><div class="sub">按你的部门角色查看负责商品、参与商品，并在当前节点完成交接</div><div class="toolbar">{tabs}{login}</div>{f'<div class="demo-note">演示角色切换（仅 DEMO_MODE 开启时显示）：</div><div class="toolbar">{role_links}</div>' if runtime.product_access.demo_mode else ''}<div class="summary"><div class="summary-item"><strong>{summary.get("total", len(data["products"]))}</strong><small>{view_labels.get(view, view)}</small></div><div class="summary-item"><strong>{summary.get("actionable", 0)}</strong><small>当前可处理</small></div><div class="summary-item"><strong>{summary.get("due_soon", 0)}</strong><small>24小时内到期</small></div><div class="summary-item"><strong>{summary.get("overdue", 0)}</strong><small>已逾期</small></div><div class="summary-user">{source_labels.get(data["source"], data["source"])} · {identity}</div></div><section class="grid">{''.join(cards)}{empty}</section></main><script>document.querySelectorAll('.advance').forEach(function(button){{button.addEventListener('click',async function(){{button.disabled=true;button.textContent='正在交接…';const response=await fetch('/api/products/'+encodeURIComponent(button.dataset.id)+'/advance',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{demo_role:{json.dumps(demo_role)},next_node:button.dataset.next}})}});const body=await response.json();if(!response.ok){{alert(body.detail||'操作失败');button.disabled=false;button.textContent='重试';return}}location.reload()}})}});</script>{h5_auth_script}</body></html>"""
+
+
+def _render_directory_admin(data: dict) -> str:
+    roles = data.get("roles", [])
+    role_options = "".join(f'<option value="{html.escape(role)}">{html.escape(role)}</option>' for role in roles)
+    rule_rows = "".join(
+        f'<tr><td>{html.escape(department)}</td><td>{html.escape(role)}</td><td><button class="danger" data-delete-rule="{html.escape(department)}">删除</button></td></tr>'
+        for department, role in sorted(data.get("role_rules", {}).items())
+    ) or '<tr><td colspan="3">暂无规则</td></tr>'
+    user_rows = []
+    for user in data.get("users", []):
+        checks = "".join(
+            f'<label><input type="checkbox" data-role="{html.escape(role)}" {"checked" if role in user.get("roles", []) else ""}>{html.escape(role)}</label>'
+            for role in roles
+        )
+        departments = "、".join(user.get("department_names", [])) or "未返回部门"
+        user_rows.append(
+            f'<tr data-user="{html.escape(user["open_id"])}"><td><strong>{html.escape(user.get("display_name") or "未命名")}</strong><small>{html.escape(user["open_id"])}</small></td><td>{html.escape(departments)}<br><small>{html.escape(user.get("job_title") or "")}</small></td><td class="role-checks">{checks}</td><td><button class="save-user">保存角色</button> <button class="auto-user">恢复自动</button></td></tr>'
+        )
+    users_html = "".join(user_rows) or '<tr><td colspan="4">员工首次从飞书打开工作台后会出现在这里</td></tr>'
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ERGOLIFE 角色配置</title><style>:root{{--blue:#3370ff;--ink:#182230;--muted:#667085;--line:#e8edf5;--bg:#f4f7fb;--red:#d92d20}}*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1180px;margin:auto;padding:28px 18px 60px}}h1{{margin:0}}.sub,small{{color:var(--muted)}}.panel{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;margin:16px 0;overflow:auto}}table{{width:100%;border-collapse:collapse}}th,td{{padding:11px 9px;border-bottom:1px solid #f0f2f6;text-align:left;vertical-align:top}}th{{color:var(--muted);font-weight:600}}input,select,button{{font:inherit;padding:7px 9px;border:1px solid #d0d5dd;border-radius:7px;background:#fff}}button{{cursor:pointer;color:var(--blue)}}button.primary{{background:var(--blue);color:#fff;border-color:var(--blue)}}button.danger{{color:var(--red)}}.role-checks{{display:flex;gap:9px;flex-wrap:wrap}}.role-checks label{{white-space:nowrap}}.top{{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}}.hint{{font-size:12px;color:var(--muted);margin:8px 0}}.back{{color:var(--blue);text-decoration:none}}</style></head><body><main><div class="top"><div><h1>员工与角色配置</h1><div class="sub">部门规则自动生效，特殊人员可单独覆盖</div></div><a class="back" href="/dashboard">返回商品工作台</a></div><section class="panel"><h2>部门 → 生命周期角色</h2><form id="rule-form"><input id="department-key" placeholder="部门名称或 department_id" required><select id="role-code" required>{role_options}</select><button class="primary">保存规则</button></form><div class="hint">规则保存后立即影响该部门员工的“我的商品”和交接通知。</div><table><thead><tr><th>部门</th><th>角色</th><th>操作</th></tr></thead><tbody>{rule_rows}</tbody></table></section><section class="panel"><h2>员工角色覆盖</h2><div class="hint">默认按部门自动匹配；保存角色会对该员工启用手工覆盖。点击“恢复自动”可撤销覆盖。</div><table><thead><tr><th>员工</th><th>部门 / 岗位</th><th>角色</th><th>操作</th></tr></thead><tbody>{users_html}</tbody></table></section></main><script>async function send(url,options){{const response=await fetch(url,options);const body=await response.json().catch(function(){{return{{}}}});if(!response.ok)throw new Error(body.detail||'操作失败');return body}}document.getElementById('rule-form').addEventListener('submit',async function(event){{event.preventDefault();try{{await send('/api/admin/directory/rules',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{department_key:document.getElementById('department-key').value,role_code:document.getElementById('role-code').value}})}});location.reload()}}catch(error){{alert(error.message)}}}});document.querySelectorAll('[data-delete-rule]').forEach(function(button){{button.addEventListener('click',async function(){{if(!confirm('确定删除该部门规则吗？'))return;try{{await send('/api/admin/directory/rules/'+encodeURIComponent(button.dataset.deleteRule),{{method:'DELETE'}});location.reload()}}catch(error){{alert(error.message)}}}})}});document.querySelectorAll('.save-user').forEach(function(button){{button.addEventListener('click',async function(){{const row=button.closest('tr');const roles=[...row.querySelectorAll('input[data-role]:checked')].map(function(input){{return input.dataset.role}});try{{await send('/api/admin/directory/users/'+encodeURIComponent(row.dataset.user)+'/roles',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{roles:roles}})}});location.reload()}}catch(error){{alert(error.message)}}}})}});document.querySelectorAll('.auto-user').forEach(function(button){{button.addEventListener('click',async function(){{const row=button.closest('tr');try{{await send('/api/admin/directory/users/'+encodeURIComponent(row.dataset.user)+'/roles/auto',{{method:'POST'}});location.reload()}}catch(error){{alert(error.message)}}}})}});</script></body></html>"""
 
 
 def _render_dashboard(projects: list[dict], selected_project_id: str | None) -> str:
@@ -201,6 +224,71 @@ def dashboard(
     except ValueError as exc:
         return HTMLResponse(f"<h1>请求有误</h1><p>{html.escape(str(exc))}</p>", status_code=400)
     return HTMLResponse(_render_product_workbench(data, view, demo_role))
+
+
+def _require_directory_admin(request: Request) -> str:
+    open_id = _current_open_id(request)
+    if not open_id:
+        raise HTTPException(status_code=401, detail="请先从飞书登录")
+    if not runtime.directory.is_admin(open_id):
+        raise HTTPException(status_code=403, detail="当前用户没有员工目录管理权限")
+    return open_id
+
+
+@app.get("/admin/directory", response_class=HTMLResponse)
+def directory_admin_page(request: Request) -> HTMLResponse:
+    try:
+        _require_directory_admin(request)
+    except HTTPException as exc:
+        return HTMLResponse(f"<h1>无法打开角色配置</h1><p>{html.escape(str(exc.detail))}</p>", status_code=exc.status_code)
+    return HTMLResponse(_render_directory_admin(runtime.directory_admin_data()))
+
+
+@app.get("/api/admin/directory")
+def directory_admin_data(request: Request) -> dict:
+    _require_directory_admin(request)
+    return runtime.directory_admin_data()
+
+
+@app.post("/api/admin/directory/rules")
+async def save_directory_rule(request: Request) -> dict:
+    _require_directory_admin(request)
+    body = await request.json()
+    try:
+        runtime.directory.set_role_rule(body.get("department_key"), body.get("role_code"))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ok", "role_rules": runtime.directory.list_role_rules()}
+
+
+@app.delete("/api/admin/directory/rules/{department_key}")
+def delete_directory_rule(department_key: str, request: Request) -> dict:
+    _require_directory_admin(request)
+    runtime.directory.remove_role_rule(department_key)
+    return {"status": "ok", "role_rules": runtime.directory.list_role_rules()}
+
+
+@app.post("/api/admin/directory/users/{open_id}/roles")
+async def save_user_roles(open_id: str, request: Request) -> dict:
+    _require_directory_admin(request)
+    body = await request.json()
+    roles = body.get("roles") or []
+    if not isinstance(roles, list):
+        raise HTTPException(status_code=400, detail="roles 必须是数组")
+    try:
+        runtime.directory.set_manual_roles(open_id, roles)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="员工尚未从飞书登录") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ok", "open_id": open_id, "roles": runtime.directory.roles_for_user(open_id)}
+
+
+@app.post("/api/admin/directory/users/{open_id}/roles/auto")
+def restore_auto_roles(open_id: str, request: Request) -> dict:
+    _require_directory_admin(request)
+    runtime.directory.clear_manual_roles(open_id)
+    return {"status": "ok", "open_id": open_id, "roles": runtime.directory.roles_for_user(open_id)}
 
 
 @app.get("/api/dashboard/projects")

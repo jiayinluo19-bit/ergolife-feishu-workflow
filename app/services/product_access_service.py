@@ -111,6 +111,8 @@ class ProductAccessService:
                 "department": actor.department,
                 "display_name": actor.display_name,
                 "demo": actor.demo,
+                "roles": list(actor.roles),
+                "is_admin": bool(self.directory and self.directory.is_admin(open_id)),
             },
             "source": self.repository.last_source,
             "roles": self.available_roles(),

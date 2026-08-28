@@ -88,6 +88,11 @@ DEMO_MODE=true
 发送给下一个角色的全部有效成员。生产环境建议设置 `DEMO_MODE=false` 和
 `ALLOW_QUERY_ACTOR=false`，这样权限只由真实飞书身份决定。
 
+当前版本已提供 `/admin/directory` 角色配置页面。管理员身份来自飞书通讯录返回的
+`is_tenant_manager`，或应用变量 `FEISHU_ADMIN_OPEN_IDS`（只需配置少量管理员，
+不是逐个配置员工）。页面可以维护部门规则、为特殊员工手工覆盖角色，并恢复自动匹配；
+保存后立即生效。
+
 机器人卡片中的工作台按钮使用 `https://applink.feishu.cn/client/web_app/open`，
 会唤起当前飞书应用的网页主页，而不是直接把 Railway 地址交给系统浏览器。
 网页主页在飞书客户端内会加载 H5 JS SDK，通过 `tt.requestAuthCode` 调用

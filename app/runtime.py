@@ -37,6 +37,8 @@ class WorkflowRuntime:
                 load_role_rules(ROOT / "config" / "role_rules.yaml")
                 or role_rules_from_assignments(self.role_assignments)
             ),
+            known_roles=self.role_assignments.keys(),
+            admin_open_ids=os.getenv("FEISHU_ADMIN_OPEN_IDS", "").split(","),
         )
         configured_user = os.getenv("FEISHU_TEST_RECEIVE_ID", "").strip()
         if os.getenv("FEISHU_RECEIVE_ID_TYPE", "open_id") == "open_id" and configured_user:
@@ -369,7 +371,15 @@ class WorkflowRuntime:
             department_ids=department_ids,
             department_names=department_names,
             active=not bool(user.get("is_frozen", False)),
+            is_tenant_manager=bool(user.get("is_tenant_manager", False)),
         )
+
+    def directory_admin_data(self) -> dict:
+        return {
+            "users": self.directory.list_users(),
+            "role_rules": self.directory.list_role_rules(),
+            "roles": [item["role"] for item in self.product_access.available_roles()],
+        }
 
     @staticmethod
     def _source_status(status: str) -> str:
