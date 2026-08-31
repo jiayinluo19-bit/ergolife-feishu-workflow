@@ -67,14 +67,18 @@ python scripts/send_test_card.py
 
 ```text
 PRODUCT_DATABASE_URL=${{ecommerce-postgres.DATABASE_URL}}
-DEMO_MODE=true
 ```
 
 网页应用打开 `/dashboard` 后可以切换“我的商品 / 我参与的商品 / 全部商品”。
-在 `DEMO_MODE=true` 时页面还会显示部门角色切换器，方便用一个飞书账号演示
-产品、采购、品质、物流、仓储、运营等角色；正式上线前应关闭该开关并使用飞书
-真实身份登录。登录入口为 `/auth/feishu/login`，回调地址为
+工作台只使用飞书真实身份和服务端部门角色，不提供查询参数身份模拟或演示角色切换。
+登录入口为 `/auth/feishu/login`，回调地址为
 `/auth/feishu/callback`，两者都要加入飞书应用的安全设置。
+
+顶部“部门 Agent”入口会在飞书内打开部署后的 xmshouxi：
+
+```text
+https://xmshouxi-production.up.railway.app/
+```
 
 ### 公司内部员工与角色
 
@@ -88,16 +92,12 @@ DEMO_MODE=true
 
 应用启动时会从 `config/role_mapping.mock.yaml` 的部门字段写入默认角色规则；后续
 可增加管理员页面维护规则，不需要为每位员工增加 Railway 环境变量。交接时会把卡片
-发送给下一个角色的全部有效成员。生产环境建议设置 `DEMO_MODE=false` 和
-`ALLOW_QUERY_ACTOR=false`，这样权限只由真实飞书身份决定。
+发送给下一个角色的全部有效成员。工作台权限只由真实飞书身份决定。
 
 当前版本已提供 `/admin/directory` 角色配置页面。管理员身份来自飞书通讯录返回的
 `is_tenant_manager`，或应用变量 `FEISHU_ADMIN_OPEN_IDS`（只需配置少量管理员，
 不是逐个配置员工）。页面可以维护部门规则、为特殊员工手工覆盖角色，并恢复自动匹配；
 保存后立即生效。
-
-在 `DEMO_MODE=true` 且未配置 `FEISHU_ADMIN_OPEN_IDS` 时，系统临时使用已有的
-`FEISHU_TEST_RECEIVE_ID` 作为演示管理员；切换到正式环境后不会继续使用这个兜底。
 
 机器人卡片中的工作台按钮使用 `https://applink.feishu.cn/client/web_app/open`，
 会唤起当前飞书应用的网页主页，而不是直接把 Railway 地址交给系统浏览器。

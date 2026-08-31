@@ -38,17 +38,11 @@ class WorkflowRuntime:
         self.assignments = load_assignments(ROOT / "config" / "role_mapping.mock.yaml")
         self.role_assignments = load_role_assignments(ROOT / "config" / "role_mapping.mock.yaml")
         directory_dsn = database_url if repository_mode != "memory" else ""
-        demo_mode = os.getenv("DEMO_MODE", "true").lower() in {"1", "true", "yes", "on"}
         admin_open_ids = [
             item.strip().strip('"\'')
             for item in os.getenv("FEISHU_ADMIN_OPEN_IDS", "").split(",")
             if item.strip().strip('"\'')
         ]
-        if demo_mode and not admin_open_ids and os.getenv("FEISHU_TEST_RECEIVE_ID", "").strip():
-            # Demo-only convenience: the existing test recipient can open the
-            # admin console without another Railway variable.  Production
-            # requires an explicit admin list or a Feishu tenant manager.
-            admin_open_ids = [os.getenv("FEISHU_TEST_RECEIVE_ID", "").strip()]
         self.directory = DirectoryRepository(
             directory_dsn,
             role_rules=(
@@ -89,7 +83,6 @@ class WorkflowRuntime:
             self.product_repository,
             self.definitions,
             self.role_assignments,
-            demo_mode=demo_mode,
             directory=self.directory,
             lifecycle_repository=self.lifecycle_repository,
         )
@@ -612,18 +605,16 @@ class WorkflowRuntime:
         *,
         view: str = "mine",
         open_id: str | None = None,
-        demo_role: str | None = None,
     ) -> dict:
-        return self.product_access.list_products(view=view, open_id=open_id, demo_role=demo_role)
+        return self.product_access.list_products(view=view, open_id=open_id)
 
     def advance_product(
         self,
         product_id: str,
         *,
         open_id: str | None = None,
-        demo_role: str | None = None,
     ) -> dict:
-        return self.product_access.advance_product(product_id, open_id=open_id, demo_role=demo_role)
+        return self.product_access.advance_product(product_id, open_id=open_id)
 
     def sync_feishu_user(self, user: dict) -> None:
         """Project the Feishu login profile into the local employee directory."""

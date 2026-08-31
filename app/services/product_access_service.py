@@ -19,7 +19,6 @@ class ActorContext:
     role: str | None
     department: str | None
     display_name: str
-    demo: bool = False
     roles: tuple[str, ...] = ()
 
 
@@ -30,31 +29,19 @@ class ProductAccessService:
         definitions: dict[str, NodeDefinition],
         roles: dict[str, RoleAssignment],
         *,
-        demo_mode: bool = True,
         directory: DirectoryRepository | None = None,
         lifecycle_repository: LifecycleRepository | None = None,
     ) -> None:
         self.repository = repository
         self.definitions = definitions
         self.roles = roles
-        self.demo_mode = demo_mode
         self.directory = directory
         self.lifecycle_repository = lifecycle_repository
         self._ordered_codes = list(definitions)
         self._role_by_user = {assignment.user_id: role for role, assignment in roles.items()}
 
-    def resolve_actor(self, open_id: str | None, demo_role: str | None = None) -> ActorContext:
+    def resolve_actor(self, open_id: str | None) -> ActorContext:
         open_id = (open_id or "").strip()
-        if self.demo_mode and demo_role in self.roles:
-            assignment = self.roles[demo_role]
-            return ActorContext(
-                open_id=assignment.user_id,
-                role=demo_role,
-                department=assignment.department,
-                display_name=assignment.display_name,
-                demo=True,
-                roles=(demo_role,),
-            )
         if self.directory and open_id:
             user = self.directory.get_user(open_id)
             user_roles = tuple(role for role in self.directory.roles_for_user(open_id) if role in self.roles)
@@ -89,11 +76,16 @@ class ProductAccessService:
         *,
         view: str = "mine",
         open_id: str | None = None,
-        demo_role: str | None = None,
         limit: int = 500,
     ) -> dict[str, Any]:
-        actor = self.resolve_actor(open_id, demo_role)
+        authenticated = bool((open_id or "").strip())
+        actor = self.resolve_actor(open_id)
         products = [self._enrich(product, actor) for product in self.repository.list_active(limit)]
+        view_counts = {
+            "mine": sum(item["access"]["is_owner"] for item in products),
+            "participating": sum(item["access"]["is_participant"] for item in products),
+            "all": len(products),
+        }
         if view == "mine":
             products = [item for item in products if item["access"]["is_owner"]]
         elif view == "participating":
@@ -113,12 +105,13 @@ class ProductAccessService:
                 "role": actor.role,
                 "department": actor.department,
                 "display_name": actor.display_name,
-                "demo": actor.demo,
+                "authenticated": authenticated,
                 "roles": list(actor.roles),
                 "is_admin": bool(self.directory and self.directory.is_admin(open_id)),
             },
             "source": self.repository.last_source,
             "roles": self.available_roles(),
+            "view_counts": view_counts,
             "summary": summary,
             "products": products,
         }
@@ -128,9 +121,8 @@ class ProductAccessService:
         product_id: str,
         *,
         open_id: str | None = None,
-        demo_role: str | None = None,
     ) -> dict[str, Any]:
-        actor = self.resolve_actor(open_id, demo_role)
+        actor = self.resolve_actor(open_id)
         product = next((item for item in self.repository.list_active(2000) if item.id == product_id), None)
         if product is None:
             raise KeyError(product_id)

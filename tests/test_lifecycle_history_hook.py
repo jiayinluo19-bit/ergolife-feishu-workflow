@@ -25,12 +25,11 @@ def test_product_advance_records_formal_lifecycle_transition():
         ProductRepository(),
         definitions,
         roles,
-        demo_mode=True,
         lifecycle_repository=history,
     )
 
-    product = service.list_products(view="all", demo_role="product_manager")["products"][0]
-    service.advance_product(product["id"], demo_role="product_manager")
+    product = service.list_products(view="all", open_id="mock_product_manager")["products"][0]
+    service.advance_product(product["id"], open_id="mock_product_manager")
 
     assert history.calls[0][0] == "ensure"
     assert history.calls[0][2] == "P01"
