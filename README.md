@@ -14,20 +14,23 @@
 - 支持项目完成和审计事件
 - 预留 MemoryRepository → Feishu Bitable → 正式数据库的替换边界
 
-## PostgreSQL 演示环境
+## PostgreSQL 员工目录数据库
 
-设置 `DATABASE_URL` 后，运行时会自动使用 PostgreSQL，并在启动时创建
-`workflow_projects`、`workflow_nodes`、`workflow_events` 三张表；首次启动还会写入三条演示商品。
-未设置该变量时继续使用内存仓储，便于本地单元测试。
+`DATABASE_URL` 用于保存飞书员工、部门和生命周期角色关系。旧版
+`workflow_projects`、`workflow_nodes`、`workflow_events` 持久化已经退役，应用不会再创建或读取这三张表。
+旧版流程兼容对象仅在进程内存中运行，不作为真实商品生命周期数据源。正式生命周期数据保存在
+`product_lifecycle_instances`、`product_lifecycle_nodes` 和 `product_lifecycle_events`，其中商品
+使用 `product_market_parameters.id` 作为外部关联键，不建立跨数据库外键。
 
 Railway 中建议在应用服务的 Variables 里添加 PostgreSQL 服务变量引用：
 
 ```text
 DATABASE_URL=${{Postgres.DATABASE_URL}}
-WORKFLOW_REPOSITORY=auto
 ```
 
-其中 `Postgres` 替换为你在 Railway 中实际显示的数据库服务名。不要把连接串提交到 Git。
+其中 `Postgres` 替换为你在 Railway 中实际显示的数据库服务名。该数据库当前保存
+`directory_users`、`lifecycle_role_rules`、`directory_role_members` 和
+`directory_role_overrides`。不要把连接串提交到 Git。
 
 ## 本地运行
 
@@ -103,5 +106,6 @@ DEMO_MODE=true
 
 当前节点允许操作时，点击“完成并交接”会以乐观并发方式把商品的
 `lifecycle_node_code` 更新为节点定义中的 `next_nodes[0]`，因此下一部门马上能在
-“我的商品”看到它。后续接入完整交付物、附件和节点历史时，可以在此适配器上继续
-扩展，而不必改页面和权限模型。
+“我的商品”看到它。首次打开全链路详情时，系统会根据当前节点建立生命周期快照，
+不会伪造历史时间；之后的推进会写入节点历史和审计事件，商品主库更新与历史写入
+分属两个数据库时，会在详情读取时自动修复中断的投影同步。

@@ -1,8 +1,8 @@
 """Small adapter for the ecommerce product master database.
 
 The workflow database and the ecommerce database are intentionally separate
-connections.  This adapter only touches ``product_market_parameters`` so the
-Feishu MVP can be introduced without coupling the workflow tables to the
+connections. This adapter only touches ``product_market_parameters`` so the
+Feishu MVP can be introduced without coupling the application database to the
 larger replenishment schema.
 """
 

@@ -5,6 +5,7 @@ from pathlib import Path
 from .config_loader import load_actions, load_assignments, load_definitions, load_role_assignments, load_role_rules, load_rules
 from .domain.models import ProductProject
 from .repositories.directory_repository import DirectoryRepository, role_rules_from_assignments
+from .repositories.lifecycle_repository import LifecycleRepository
 from .repositories.memory_repository import MemoryRepository
 from .repositories.product_repository import ProductRepository
 from .services.product_access_service import ProductAccessService
@@ -15,16 +16,22 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WorkflowRuntime:
-    """MVP process-local runtime; replace the repository with Bitable later."""
+    """Runtime for the legacy workflow compatibility endpoints.
+
+    The old workflow PostgreSQL persistence has been retired. Real product
+    lifecycle state is served by ProductRepository and the directory tables
+    remain in the application PostgreSQL database; this compatibility layer
+    is intentionally process-local for legacy compatibility. Real product
+    lifecycle history uses the formal lifecycle tables in the application DB.
+    """
 
     def __init__(self) -> None:
         self.repository = MemoryRepository()
         database_url = os.getenv("DATABASE_URL", "").strip()
         repository_mode = os.getenv("WORKFLOW_REPOSITORY", "auto").strip().lower()
-        if repository_mode == "postgres" or (repository_mode == "auto" and database_url):
-            from .repositories.postgres_repository import PostgresRepository
-
-            self.repository = PostgresRepository(database_url)
+        # The legacy workflow_* tables are retired. Keep the old service
+        # objects in memory for compatibility with tests and historical card
+        # actions, but never create or read those tables in production.
         self.definitions = load_definitions(ROOT / "config" / "workflow_v1.yaml")
         self.actions = load_actions(ROOT / "config" / "actions_v1.yaml")
         self.rules = load_rules(ROOT / "config" / "rules_v1.yaml")
@@ -77,12 +84,14 @@ class WorkflowRuntime:
         self.service = WorkflowService(self.repository, self.definitions, self.assignments)
         self.simulation_mode = os.getenv("WORKFLOW_SIMULATION_MODE", "true").lower() in {"1", "true", "yes", "on"}
         self.product_repository = ProductRepository()
+        self.lifecycle_repository = LifecycleRepository(directory_dsn)
         self.product_access = ProductAccessService(
             self.product_repository,
             self.definitions,
             self.role_assignments,
             demo_mode=demo_mode,
             directory=self.directory,
+            lifecycle_repository=self.lifecycle_repository,
         )
         self._ensure_mock_project()
 
@@ -139,13 +148,7 @@ class WorkflowRuntime:
         self._advance_demo_project_to(project_id, completed_nodes)
 
     def _advance_demo_project_to(self, project_id: str, completed_nodes: int) -> None:
-        """Idempotently bring a demo project to its configured checkpoint.
-
-        PostgreSQL returns fresh model instances on every read, unlike the
-        in-memory repository. Reloading the project on every iteration keeps
-        the seeding logic correct for both repository implementations and also
-        repairs partially seeded demo rows after a deployment restart.
-        """
+        """Idempotently bring an in-memory demo project to its checkpoint."""
         completed = sum(
             node.status.value == "completed"
             for node in self.repository.list_project_nodes(project_id)
@@ -254,8 +257,11 @@ class WorkflowRuntime:
 
         The product master currently stores the current lifecycle node, not a
         separate node-event history.  We therefore derive node states from
-        that value and leave event lists empty until the history table exists.
+        that value and leave event lists empty when the formal history store
+        is not configured.
         """
+        if self.lifecycle_repository.dsn:
+            return self._real_lifecycle_dashboard_data_with_history(product_id)
         products = self.product_repository.list_active(limit=500)
         if not products:
             return []
@@ -369,6 +375,138 @@ class WorkflowRuntime:
                     "stages": [],
                     "rules": [],
                     "source": self.product_repository.last_source,
+                }
+            )
+        return result
+
+    def _real_lifecycle_dashboard_data_with_history(self, product_id: str | None = None) -> list[dict]:
+        products = self.product_repository.list_active(limit=500)
+        if not products:
+            return []
+        product = next((item for item in products if item.id == product_id), products[0])
+        assignments = {role: assignment.user_id for role, assignment in self.role_assignments.items()}
+        self.lifecycle_repository.ensure_product(
+            product.id, product.lifecycle_node_code, self.definitions, assignments
+        )
+        snapshot = self.lifecycle_repository.snapshot(product.id)
+        if snapshot is None:
+            return []
+        nodes = []
+        for record in snapshot.nodes:
+            definition = self.definitions.get(record.definition_id)
+            if definition is None:
+                continue
+            nodes.append(
+                {
+                    "id": record.id,
+                    "definition_id": record.definition_id,
+                    "occurrence": record.occurrence,
+                    "name": definition.name,
+                    "stage": definition.stage,
+                    "status": record.status,
+                    "source_status": self._source_status(record.status),
+                    "owner_role": definition.owner_role,
+                    "owner_user_id": record.owner_user_id,
+                    "reviewer_user_id": record.reviewer_user_id,
+                    "started_at": record.started_at,
+                    "submitted_at": record.submitted_at,
+                    "completed_at": record.completed_at,
+                    "events": record.events,
+                    "trigger_type": definition.trigger_type.value,
+                    "trigger_condition": definition.trigger_condition,
+                    "trigger_event": definition.trigger_event,
+                    "trigger_metric": definition.trigger_metric,
+                    "trigger_operator": definition.trigger_operator,
+                    "trigger_value": definition.trigger_value,
+                    "initiator": definition.initiator,
+                    "handoff": definition.handoff,
+                    "action_ids": definition.action_ids,
+                    "actions": [
+                        self.actions[action_id].model_dump(mode="json")
+                        for action_id in definition.action_ids
+                        if action_id in self.actions
+                    ],
+                    "outcome_options": definition.outcome_options,
+                }
+            )
+        current_index = next(
+            (index for index, node in enumerate(nodes) if node["id"] == snapshot.current_node_id),
+            next((index for index, node in enumerate(nodes) if node["definition_id"] == snapshot.current_node_code), 0),
+        )
+        current_node = nodes[current_index] if nodes else None
+        current_definition = self.definitions.get(snapshot.current_node_code)
+        stage_names = list(dict.fromkeys(node["stage"] for node in nodes))
+        stages = []
+        for stage in stage_names:
+            stage_nodes = [node for node in nodes if node["stage"] == stage]
+            completed = sum(node["status"] == "completed" for node in stage_nodes)
+            stage_status = (
+                "completed"
+                if completed == len(stage_nodes)
+                else "current"
+                if current_definition and stage == current_definition.stage
+                else "upcoming"
+            )
+            stages.append(
+                {
+                    "name": stage,
+                    "status": stage_status,
+                    "completed": completed,
+                    "total": len(stage_nodes),
+                    "nodes": stage_nodes,
+                }
+            )
+        selected_project = {
+            "id": product.id,
+            "product_code": product.sku,
+            "product_name": product.product_name,
+            "target_market": product.country_code,
+            "sales_channel": product.store or "—",
+            "status": "active" if product.is_active else "inactive",
+            "current_node_id": snapshot.current_node_id or snapshot.current_node_code,
+            "current_node_code": snapshot.current_node_code,
+            "current_node_name": current_definition.name if current_definition else "未配置节点",
+            "completed": sum(node["status"] == "completed" for node in nodes),
+            "total": len(nodes),
+            "current_stage": current_definition.stage if current_definition else "未配置阶段",
+            "previous_node": nodes[current_index - 1] if current_index > 0 and nodes else None,
+            "current_node": current_node,
+            "next_node": nodes[current_index + 1] if current_index + 1 < len(nodes) else None,
+            "nodes": nodes,
+            "stages": stages,
+            "rules": [rule.model_dump(mode="json") for rule in self.rules.values()],
+            "source": self.product_repository.last_source,
+            "history_source": self.lifecycle_repository.source,
+        }
+        result = [selected_project]
+        ordered_codes = list(self.definitions)
+        for item in products:
+            if item.id == product.id:
+                continue
+            item_index = ordered_codes.index(item.lifecycle_node_code) if item.lifecycle_node_code in ordered_codes else 0
+            item_definition = self.definitions.get(item.lifecycle_node_code)
+            result.append(
+                {
+                    "id": item.id,
+                    "product_code": item.sku,
+                    "product_name": item.product_name,
+                    "target_market": item.country_code,
+                    "sales_channel": item.store or "—",
+                    "status": "active" if item.is_active else "inactive",
+                    "current_node_id": item.lifecycle_node_code,
+                    "current_node_code": item.lifecycle_node_code,
+                    "current_node_name": item_definition.name if item_definition else "未配置节点",
+                    "completed": item_index,
+                    "total": len(ordered_codes),
+                    "current_stage": item_definition.stage if item_definition else "未配置阶段",
+                    "previous_node": None,
+                    "current_node": None,
+                    "next_node": None,
+                    "nodes": [],
+                    "stages": [],
+                    "rules": [],
+                    "source": self.product_repository.last_source,
+                    "history_source": self.lifecycle_repository.source,
                 }
             )
         return result

@@ -9,6 +9,7 @@ from typing import Any
 from ..config_loader import load_role_assignments
 from ..domain.models import NodeDefinition, RoleAssignment
 from ..repositories.directory_repository import DirectoryRepository
+from ..repositories.lifecycle_repository import LifecycleRepository
 from ..repositories.product_repository import ProductRecord, ProductRepository
 
 
@@ -31,12 +32,14 @@ class ProductAccessService:
         *,
         demo_mode: bool = True,
         directory: DirectoryRepository | None = None,
+        lifecycle_repository: LifecycleRepository | None = None,
     ) -> None:
         self.repository = repository
         self.definitions = definitions
         self.roles = roles
         self.demo_mode = demo_mode
         self.directory = directory
+        self.lifecycle_repository = lifecycle_repository
         self._ordered_codes = list(definitions)
         self._role_by_user = {assignment.user_id: role for role, assignment in roles.items()}
 
@@ -140,7 +143,34 @@ class ProductAccessService:
         if not definition.next_nodes:
             raise ValueError("当前商品已经到达生命周期末端")
         next_node = definition.next_nodes[0]
+        if self.lifecycle_repository:
+            self.lifecycle_repository.ensure_product(
+                product.id,
+                product.lifecycle_node_code,
+                self.definitions,
+                {role: assignment.user_id for role, assignment in self.roles.items()},
+            )
         updated = self.repository.advance(product.id, product.lifecycle_node_code, next_node)
+        if self.lifecycle_repository:
+            try:
+                self.lifecycle_repository.record_advance(
+                    product.id,
+                    product.lifecycle_node_code,
+                    next_node,
+                    actor.open_id or actor.role or "unknown",
+                    self.definitions,
+                    {role: assignment.user_id for role, assignment in self.roles.items()},
+                )
+            except Exception:
+                # The product-master update is already committed in another
+                # database.  Read-side reconciliation repairs the lifecycle
+                # projection on the next detail request without pretending
+                # that the handoff itself failed.
+                import logging
+
+                logging.getLogger(__name__).exception(
+                    "product advanced but lifecycle history could not be recorded: %s", product.id
+                )
         return self._enrich(updated, actor)
 
     def _enrich(self, product: ProductRecord, actor: ActorContext) -> dict[str, Any]:
