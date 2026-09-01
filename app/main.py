@@ -1,6 +1,7 @@
 import html
 import os
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -12,11 +13,15 @@ from .integrations.feishu.cards import product_handoff_card, project_lifecycle_c
 from .integrations.feishu.client import FeishuNotConfiguredError, FeishuOpenAPI
 from .integrations.feishu.identity import FeishuIdentity, FeishuIdentityError
 from .product_workbench_page import render_product_workbench
+from .repositories.agent_sso_repository import AgentSSOTicketRepository
 from .runtime import runtime
 from .services.workflow_service import WorkflowError
 
 app = FastAPI(title="ERGOLIFE 商品全生命周期协同 MVP", version="0.1.0")
 feishu_identity = FeishuIdentity()
+agent_sso_tickets = AgentSSOTicketRepository()
+XMSHOUXI_URL = os.getenv("XMSHOUXI_URL", "https://xmshouxi-production.up.railway.app").rstrip("/")
+AGENT_SSO_SHARED_SECRET = os.getenv("AGENT_SSO_SHARED_SECRET", "").strip()
 
 
 def _current_open_id(request: Request) -> str | None:
@@ -416,11 +421,11 @@ def feishu_login() -> RedirectResponse:
 @app.get("/auth/feishu/callback")
 def feishu_callback(code: str, state: str) -> Response:
     try:
-        user = feishu_identity.exchange_code(code, state)
+        user, next_path = feishu_identity.exchange_code(code, state)
     except FeishuIdentityError as exc:
         return HTMLResponse(f"<h1>飞书登录失败</h1><p>{html.escape(str(exc))}</p>", status_code=400)
     runtime.sync_feishu_user(user)
-    response = RedirectResponse("/dashboard", status_code=303)
+    response = RedirectResponse(next_path, status_code=303)
     response.set_cookie(
         "ergolife_session",
         feishu_identity.sign_session(str(user["open_id"])),
@@ -430,6 +435,55 @@ def feishu_callback(code: str, state: str) -> Response:
         max_age=86400,
     )
     return response
+
+
+def _safe_agent_path(path: str) -> str:
+    return path if path.startswith("/") and not path.startswith("//") else "/"
+
+
+@app.on_event("startup")
+def ensure_agent_sso_schema() -> None:
+    if agent_sso_tickets.dsn:
+        agent_sso_tickets.ensure_schema()
+
+
+@app.get("/auth/agent/start")
+def agent_sso_start(request: Request, return_to: str = "/") -> RedirectResponse:
+    target_path = _safe_agent_path(return_to)
+    open_id = _current_open_id(request)
+    if not open_id:
+        try:
+            login_path = f"/auth/agent/start?return_to={quote(target_path, safe='')}"
+            return RedirectResponse(feishu_identity.authorization_url(login_path), status_code=307)
+        except FeishuIdentityError as exc:
+            return HTMLResponse(f"<h1>飞书登录暂不可用</h1><p>{html.escape(str(exc))}</p>", status_code=503)
+    if not AGENT_SSO_SHARED_SECRET:
+        return HTMLResponse("<h1>Agent 单点登录暂不可用</h1><p>未配置共享服务密钥</p>", status_code=503)
+    try:
+        ticket = agent_sso_tickets.issue(open_id, target_path)
+    except Exception as exc:
+        return HTMLResponse(f"<h1>Agent 单点登录暂不可用</h1><p>{html.escape(str(exc))}</p>", status_code=503)
+    return RedirectResponse(f"{XMSHOUXI_URL}/auth/sso/callback?ticket={quote(ticket, safe='')}", status_code=303)
+
+
+@app.post("/api/internal/agent/sso/exchange")
+async def exchange_agent_sso(request: Request) -> dict:
+    if not AGENT_SSO_SHARED_SECRET or request.headers.get("X-Agent-SSO-Secret") != AGENT_SSO_SHARED_SECRET:
+        raise HTTPException(status_code=401, detail="无效的 Agent 服务凭证")
+    body = await request.json()
+    ticket = str(body.get("ticket") or "")
+    data = agent_sso_tickets.consume(ticket)
+    if not data:
+        raise HTTPException(status_code=401, detail="登录票据无效或已过期")
+    user = runtime.directory.get_user(data["open_id"])
+    return {
+        "open_id": data["open_id"],
+        "target_path": data["target_path"],
+        "display_name": getattr(user, "display_name", "") if user else "当前员工",
+        "department_names": list(getattr(user, "department_names", []) or []) if user else [],
+        "job_title": getattr(user, "job_title", "") if user else "",
+        "roles": runtime.directory.roles_for_user(data["open_id"]),
+    }
 
 
 @app.get("/auth/feishu/logout")

@@ -35,23 +35,24 @@ class FeishuIdentity:
             "FEISHU_REDIRECT_URI", f"{self.public_base_url}/auth/feishu/callback"
         )
         self.session_secret = os.getenv("SESSION_SECRET", self.app_secret or "local-demo-session-secret")
-        self._states: dict[str, float] = {}
+        self._states: dict[str, tuple[float, str]] = {}
 
-    def authorization_url(self) -> str:
+    def authorization_url(self, next_path: str = "/dashboard") -> str:
         if not self.app_id:
             raise FeishuIdentityError("未配置 FEISHU_APP_ID")
         state = secrets.token_urlsafe(24)
-        self._states[state] = time.time() + 300
+        safe_next_path = next_path if next_path.startswith("/") and not next_path.startswith("//") else "/dashboard"
+        self._states[state] = (time.time() + 300, safe_next_path)
         query = urlencode({"app_id": self.app_id, "redirect_uri": self.redirect_uri, "state": state})
         return f"https://open.feishu.cn/open-apis/authen/v1/authorize?{query}"
 
-    def exchange_code(self, code: str, state: str) -> dict:
-        expires_at = self._states.pop(state, 0)
-        if not expires_at or expires_at < time.time():
+    def exchange_code(self, code: str, state: str) -> tuple[dict, str]:
+        state_record = self._states.pop(state, None)
+        if not state_record or state_record[0] < time.time():
             raise FeishuIdentityError("登录状态已失效，请重新登录")
         if not self.app_id or not self.app_secret:
             raise FeishuIdentityError("未配置飞书应用凭证")
-        return self._exchange_user_code(code)
+        return self._exchange_user_code(code), state_record[1]
 
     def exchange_h5_code(self, code: str) -> dict:
         """Exchange ``tt.requestAuthCode`` output from the Feishu client."""

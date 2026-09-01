@@ -109,3 +109,10 @@ https://xmshouxi-production.up.railway.app/
 “我的商品”看到它。首次打开全链路详情时，系统会根据当前节点建立生命周期快照，
 不会伪造历史时间；之后的推进会写入节点历史和审计事件，商品主库更新与历史写入
 分属两个数据库时，会在详情读取时自动修复中断的投影同步。
+
+### xmshouxi 单点登录
+
+“部门 Agent”入口通过 `/auth/agent/start` 为当前飞书员工签发一次性短期票据，
+由 xmshouxi 服务端兑换后建立自己的会话。两个 Railway 服务不共享 Cookie，也不在
+URL 中传递长期凭证。生产环境需要在本服务和 xmshouxi 服务同时配置同一个
+`AGENT_SSO_SHARED_SECRET`，并将 `XMSHOUXI_URL` 指向 Agent 部署地址。

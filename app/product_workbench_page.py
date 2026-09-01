@@ -117,7 +117,7 @@ def render_product_workbench(data: dict[str, Any], view: str, feishu_app_id: str
 <header class="el-topbar">
   <a class="el-brand" href="/dashboard"><span class="el-brand-mark">E</span><span><strong>ERGOLIFE</strong><small>商品协同中心</small></span></a>
   <nav class="el-primary-nav" aria-label="主要导航">{primary_nav}</nav>
-  <a class="el-agent-link" href="{XMSHOUXI_URL}" target="_blank" rel="noopener noreferrer">部门 Agent <span aria-hidden="true">↗</span></a>
+  <a class="el-agent-link" href="/auth/agent/start?return_to=%2F" data-agent-url="{XMSHOUXI_URL}/" target="_blank" rel="noopener noreferrer">部门 Agent <span aria-hidden="true">↗</span></a>
   <div class="el-account">{admin_menu}{identity}</div>
 </header>
 <main class="el-main">
